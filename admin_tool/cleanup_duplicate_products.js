@@ -1,0 +1,53 @@
+[{
+    "resource": "/c:/Users/natha/medstock/flutter_application_1/admin_tool/cleanup_duplicate_products.js",
+    "owner": "typescript",
+    "code": "1109",
+    "severity": 8,
+    "message": "Expression expected.",
+    "source": "ts",
+    "startLineNumber": 76,
+    "startColumn": 38,
+    "endLineNumber": 76,
+    "endColumn": 39,
+    "modelVersionId": 3,
+    "origin": "extHost1"
+}, {
+    "resource": "/c:/Users/natha/medstock/flutter_application_1/admin_tool/cleanup_duplicate_products.js",
+    "owner": "typescript",
+    "code": "1005",
+    "severity": 8,
+    "message": "':' expected.",
+    "source": "ts",
+    "startLineNumber": 76,
+    "startColumn": 47,
+    "endLineNumber": 76,
+    "endColumn": 48,
+    "modelVersionId": 3,
+    "origin": "extHost1"
+}, {
+    "resource": "/c:/Users/natha/medstock/flutter_application_1/admin_tool/cleanup_duplicate_products.js",
+    "owner": "typescript",
+    "code": "1109",
+    "severity": 8,
+    "message": "Expression expected.",
+    "source": "ts",
+    "startLineNumber": 76,
+    "startColumn": 67,
+    "endLineNumber": 76,
+    "endColumn": 68,
+    "modelVersionId": 3,
+    "origin": "extHost1"
+}, {
+    "resource": "/c:/Users/natha/medstock/flutter_application_1/admin_tool/cleanup_duplicate_products.js",
+    "owner": "typescript",
+    "code": "1005",
+    "severity": 8,
+    "message": "':' expected.",
+    "source": "ts",
+    "startLineNumber": 76,
+    "startColumn": 76,
+    "endLineNumber": 76,
+    "endColumn": 77,
+    "modelVersionId": 3,
+    "origin": "extHost1"
+}]
