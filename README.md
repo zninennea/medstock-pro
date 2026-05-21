@@ -1,17 +1,80 @@
-# flutter_application_1
+# MedStock Pro - Advanced Pharmacy Inventory System
 
-A new Flutter project.
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-blue.svg)](https://flutter.dev)
+[![Firebase](https://img.shields.io/badge/Firebase-Latest-orange.svg)](https://firebase.google.com)
 
-## Getting Started
+## 🏥 Overview
 
-This project is a starting point for a Flutter application.
+MedStock Pro is a comprehensive multi-tenant pharmacy inventory management system built with Flutter and Firebase. It provides real-time inventory tracking, stock management, transaction recording, and payment processing for multiple pharmacy tenants.
 
-A few resources to get you started if this is your first Flutter project:
+## ✨ Features
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### 🏢 Multi-Tenant Architecture
+- Isolated data per tenant
+- Super admin dashboard for tenant management
+- Tenant-specific staff accounts
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 📦 Product Management
+- CRUD operations for products
+- Stock level tracking
+- Expiry date monitoring
+- Low stock alerts
+- Batch/Lot number tracking
+
+### 📊 Transactions
+- Stock IN/OUT recording
+- Transaction history with pagination
+- Audit trail for all activities
+- Multiple reason categories
+
+### 👥 Staff Management
+- Role-based access (Super Admin, Admin, Staff)
+- Staff account creation
+- Secure password management
+
+### 💳 Payment Processing
+- Cash and GCash payments
+- Receipt upload and storage
+- Payment verification
+- Monthly billing tracking
+- Payment due alerts
+
+### 📈 Analytics
+- Real-time dashboard metrics
+- Inventory value calculation
+- Stock turnover rate
+- Top movers tracking
+- Expiry calendar
+
+### 🎨 UI/UX
+- Responsive design (Mobile + Desktop)
+- Dark/Light theme support
+- Interactive charts
+- Paginated tables
+- Offline support
+
+## 🛠️ Tech Stack
+
+- **Frontend:** Flutter (Dart)
+- **Backend:** Firebase
+  - Firebase Authentication
+  - Cloud Firestore
+  - Firebase Storage
+- **State Management:** Provider
+- **Charts:** fl_chart
+- **Excel Export:** Excel package
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Flutter SDK (>=3.0.0)
+- Firebase account
+- Node.js (for admin tools)
+
+### Installation
+
+1. Clone the repository
+```bash
+git clone https://github.com/YOUR_USERNAME/medstock-pro.git
+cd medstock-pro

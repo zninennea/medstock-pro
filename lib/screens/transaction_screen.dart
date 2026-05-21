@@ -23,6 +23,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   model.TransactionType _transactionType = model.TransactionType.stockIn;
   final List<TransactionItem> _items = [];
   final _referenceController = TextEditingController();
+
   String _selectedStaff = '';
   bool _isSubmitting = false;
 
@@ -50,18 +51,34 @@ class _TransactionScreenState extends State<TransactionScreen> {
     _selectedStaff = currentUserName;
   }
 
+  // lib/screens/transaction_screen.dart
+
+// Update the _loadRecentTransactions method
   Future<void> _loadRecentTransactions() async {
     setState(() => _isLoadingHistory = true);
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final tenantProvider = Provider.of<TenantProvider>(context, listen: false);
     final tenantId = authProvider.currentTenantId ?? 'davmedical';
+
+    // Force refresh the tenant data from Firestore
+    await tenantProvider.refreshTenants();
+
     final tenant = tenantProvider.getCurrentTenant(tenantId);
 
     if (tenant != null) {
       setState(() {
         _recentTransactions = tenant.transactions.toList();
       });
+      debugPrint(
+          '✅ Loaded ${_recentTransactions.length} transactions for tenant: $tenantId');
+    } else {
+      debugPrint('⚠️ Tenant not found: $tenantId');
+      setState(() {
+        _recentTransactions = [];
+      });
     }
+
     setState(() => _isLoadingHistory = false);
   }
 
@@ -368,7 +385,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     // Generate a unique batch ID for this transaction batch
     final batchId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    // Check if this batch was already processed (prevent double submission)
+    // Prevent duplicate submissions
     if (_processedTransactionIds.contains(batchId)) {
       debugPrint('⚠️ Duplicate transaction batch detected, skipping...');
       return;
@@ -387,13 +404,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
     for (final item in validItems) {
       final product = item.product!;
       int newQty = product.qty;
+
       if (_transactionType == model.TransactionType.stockIn) {
         newQty += item.qty;
       } else {
         newQty -= item.qty;
       }
 
-      // Update product
+      // Update product in Firestore and local state
       final updatedProduct = product.copyWith(qty: newQty);
       await productProvider.updateProduct(updatedProduct);
 
@@ -413,7 +431,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
         continue;
       }
 
-      // Create transaction record using model.Transaction
+      // Create transaction record
       final transaction = model.Transaction(
         id: transactionId,
         productId: product.id,
@@ -462,9 +480,17 @@ class _TransactionScreenState extends State<TransactionScreen> {
           role: authProvider.currentUser?.role ?? UserRole.staff,
         ),
       );
+
+      // ================================================
+      // CRITICAL: Update or resolve alerts based on new stock level
+      // ================================================
+      await _updateAlertsAfterTransaction(tenantId, updatedProduct);
     }
 
-    // Refresh recent transactions
+    // Refresh products to update UI
+    await productProvider.refreshProducts(tenantId);
+
+    // Reload recent transactions
     await _loadRecentTransactions();
 
     // Show success message
@@ -489,6 +515,242 @@ class _TransactionScreenState extends State<TransactionScreen> {
       _referenceController.text = _generateReference();
       _isSubmitting = false;
     });
+  }
+
+// Add this helper method to update alerts after transaction
+  // Add these helper methods after _processTransactions
+
+  Future<void> _updateAlertsAfterTransaction(
+      String tenantId, Product product) async {
+    try {
+      final now = DateTime.now();
+      final daysUntilExpiry = product.expirationDate.difference(now).inDays;
+
+      // Check conditions
+      final isLowStock = product.qty <= product.reorderThreshold;
+      final isExpired = product.isExpired;
+      final isExpiringSoon = daysUntilExpiry <= 90 && daysUntilExpiry > 0;
+
+      // Find existing unresolved alerts for this product
+      final existingAlerts = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .where('productId', isEqualTo: product.id)
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      // Resolve alerts that no longer apply
+      for (final alertDoc in existingAlerts.docs) {
+        final alertData = alertDoc.data();
+        final alertType = alertData['type'];
+
+        bool shouldResolve = false;
+
+        if (alertType == 'low_stock' && !isLowStock) {
+          shouldResolve = true;
+        } else if (alertType == 'expiring' && !isExpiringSoon) {
+          shouldResolve = true;
+        } else if (alertType == 'expired' && !isExpired) {
+          shouldResolve = true;
+        }
+
+        if (shouldResolve) {
+          await alertDoc.reference.update({
+            'resolved': true,
+            'resolvedAt': FieldValue.serverTimestamp(),
+            'resolvedReason': 'Stock updated via transaction',
+          });
+          debugPrint('✅ Resolved alert for product: ${product.meds}');
+        }
+      }
+
+      // Create new alerts if conditions are met
+      if (isLowStock && !isExpired) {
+        await _createLowStockAlert(tenantId, product);
+      }
+
+      if (isExpiringSoon && !isExpired) {
+        await _createExpiryAlert(tenantId, product, daysUntilExpiry);
+      }
+
+      if (isExpired) {
+        await _createExpiredAlert(tenantId, product);
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating alerts: $e');
+    }
+  }
+
+  Future<void> _createLowStockAlert(String tenantId, Product product) async {
+    try {
+      // Check if unresolved alert already exists
+      final existingAlert = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .where('productId', isEqualTo: product.id)
+          .where('type', isEqualTo: 'low_stock')
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      if (existingAlert.docs.isNotEmpty) {
+        // Update existing alert
+        await existingAlert.docs.first.reference.update({
+          'currentStock': product.qty,
+          'severity': product.qty == 0 ? 'critical' : 'warning',
+          'message':
+              '⚠️ Low stock: ${product.meds} has only ${product.qty} units left (threshold: ${product.reorderThreshold})',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        debugPrint('✅ Updated low stock alert for: ${product.meds}');
+        return;
+      }
+
+      // Create new alert
+      final alertId =
+          'low_stock_${product.id}_${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .doc(alertId)
+          .set({
+        'id': alertId,
+        'productId': product.id,
+        'productName': product.meds,
+        'type': 'low_stock',
+        'severity': product.qty == 0 ? 'critical' : 'warning',
+        'message':
+            '⚠️ Low stock: ${product.meds} has only ${product.qty} units left (threshold: ${product.reorderThreshold})',
+        'currentStock': product.qty,
+        'threshold': product.reorderThreshold,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+        'resolved': false,
+      });
+      debugPrint('✅ Created low stock alert for: ${product.meds}');
+    } catch (e) {
+      debugPrint('❌ Failed to create low stock alert: $e');
+    }
+  }
+
+  Future<void> _createExpiryAlert(
+      String tenantId, Product product, int daysUntilExpiry) async {
+    try {
+      // Check if unresolved alert already exists
+      final existingAlert = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .where('productId', isEqualTo: product.id)
+          .where('type', isEqualTo: 'expiring')
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      if (existingAlert.docs.isNotEmpty) {
+        // Update existing alert
+        String severity = 'info';
+        if (daysUntilExpiry <= 7) {
+          severity = 'critical';
+        } else if (daysUntilExpiry <= 30) {
+          severity = 'warning';
+        }
+
+        await existingAlert.docs.first.reference.update({
+          'daysUntilExpiry': daysUntilExpiry,
+          'severity': severity,
+          'message':
+              '📅 Expiring soon: ${product.meds} (Lot: ${product.lotNumber}) expires in $daysUntilExpiry days',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        debugPrint('✅ Updated expiry alert for: ${product.meds}');
+        return;
+      }
+
+      // Create new alert
+      String severity = 'info';
+      if (daysUntilExpiry <= 7) {
+        severity = 'critical';
+      } else if (daysUntilExpiry <= 30) {
+        severity = 'warning';
+      }
+
+      final alertId =
+          'expiry_${product.id}_${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .doc(alertId)
+          .set({
+        'id': alertId,
+        'productId': product.id,
+        'productName': product.meds,
+        'lotNumber': product.lotNumber,
+        'type': 'expiring',
+        'severity': severity,
+        'message':
+            '📅 Expiring soon: ${product.meds} (Lot: ${product.lotNumber}) expires in $daysUntilExpiry days',
+        'expiryDate': product.expirationDate,
+        'daysUntilExpiry': daysUntilExpiry,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+        'resolved': false,
+      });
+      debugPrint('✅ Created expiry alert for: ${product.meds}');
+    } catch (e) {
+      debugPrint('❌ Failed to create expiry alert: $e');
+    }
+  }
+
+  Future<void> _createExpiredAlert(String tenantId, Product product) async {
+    try {
+      // Check if unresolved alert already exists
+      final existingAlert = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .where('productId', isEqualTo: product.id)
+          .where('type', isEqualTo: 'expired')
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      if (existingAlert.docs.isNotEmpty) {
+        debugPrint('⚠️ Expired alert already exists for: ${product.meds}');
+        return;
+      }
+
+      // Create new alert
+      final alertId =
+          'expired_${product.id}_${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .doc(alertId)
+          .set({
+        'id': alertId,
+        'productId': product.id,
+        'productName': product.meds,
+        'lotNumber': product.lotNumber,
+        'type': 'expired',
+        'severity': 'critical',
+        'message':
+            '⚠️ EXPIRED: ${product.meds} (Lot: ${product.lotNumber}) expired on ${_formatDate(product.expirationDate)}',
+        'expiryDate': product.expirationDate,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+        'resolved': false,
+      });
+      debugPrint('✅ Created expired alert for: ${product.meds}');
+    } catch (e) {
+      debugPrint('❌ Failed to create expired alert: $e');
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
   @override

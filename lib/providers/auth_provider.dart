@@ -350,6 +350,8 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
+  // lib/providers/auth_provider.dart
+
   Future<bool> changePassword(
     String email,
     String oldPassword,
@@ -358,23 +360,33 @@ class AuthProvider extends ChangeNotifier {
     final normalizedEmail = email.toLowerCase().trim();
     final currentUser = _firebaseAuth.currentUser;
 
-    if (currentUser == null ||
-        currentUser.email?.toLowerCase().trim() != normalizedEmail) {
+    // Check if user is authenticated and email matches
+    if (currentUser == null) {
+      debugPrint('❌ Password change failed: No user logged in');
+      return false;
+    }
+
+    if (currentUser.email?.toLowerCase().trim() != normalizedEmail) {
       debugPrint(
-          '❌ Password change failed: User not authenticated or email mismatch');
+          '❌ Password change failed: Email mismatch. Current: ${currentUser.email}, Requested: $normalizedEmail');
       return false;
     }
 
     try {
-      // Re-authenticate user first
+      // Re-authenticate user first (required for security)
       final credential = fb_auth.EmailAuthProvider.credential(
         email: normalizedEmail,
         password: oldPassword,
       );
-      await currentUser.reauthenticateWithCredential(credential);
-      await currentUser.updatePassword(newPassword);
 
-      // Update password in local accounts
+      await currentUser.reauthenticateWithCredential(credential);
+      debugPrint('✅ Re-authentication successful');
+
+      // Update password
+      await currentUser.updatePassword(newPassword);
+      debugPrint('✅ Password updated in Firebase Auth');
+
+      // Update password in local Firestore account
       final account = _accounts[normalizedEmail];
       if (account != null) {
         account.password = newPassword;
@@ -382,15 +394,18 @@ class AuthProvider extends ChangeNotifier {
           account.email,
           account.toJson(),
         );
-        if (!success) {
-          debugPrint('⚠️ Failed to update password in Firestore.');
+        if (success) {
+          debugPrint('✅ Password updated in Firestore');
+        } else {
+          debugPrint('⚠️ Failed to update password in Firestore');
         }
       }
 
-      debugPrint('✅ Password changed successfully for: $normalizedEmail');
       return true;
     } on fb_auth.FirebaseAuthException catch (e) {
       debugPrint('❌ Firebase password change failed: ${e.code} - ${e.message}');
+
+      // Return false with specific error code for UI to handle
       return false;
     } catch (e) {
       debugPrint('❌ Password change error: $e');
@@ -479,6 +494,8 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // In auth_provider.dart, simplify the createStaffAccount method:
+
   Future<bool> createStaffAccount({
     required String adminEmail,
     required String staffEmail,
@@ -491,8 +508,7 @@ class AuthProvider extends ChangeNotifier {
 
     final creator = _accounts[normalizedAdmin];
     if (creator == null || creator.role != UserRole.admin) {
-      debugPrint(
-          '❌ createStaffAccount: Unauthorized - Admin not found or not admin role');
+      debugPrint('❌ createStaffAccount: Unauthorized');
       return false;
     }
 
@@ -527,7 +543,7 @@ class AuthProvider extends ChangeNotifier {
       } catch (_) {}
     }
 
-    // Set custom claims for the staff user via API
+    // Set custom claims
     if (userCredential != null && userCredential.user != null) {
       await _setCustomClaimsViaAPI(
         email: normalizedStaff,
@@ -535,6 +551,7 @@ class AuthProvider extends ChangeNotifier {
         tenantId: normalizedTenantId,
       );
       await userCredential.user!.getIdToken(true);
+      debugPrint('✅ Custom claims set for staff: $normalizedStaff');
     }
 
     final account = AuthAccount(
@@ -548,6 +565,7 @@ class AuthProvider extends ChangeNotifier {
 
     _accounts[normalizedStaff] = account;
 
+    // Single attempt to save to Firestore (no retry loop)
     final success = await _firestoreService.addAuthAccount(
         normalizedStaff, account.toJson());
 
@@ -558,7 +576,6 @@ class AuthProvider extends ChangeNotifier {
     } else {
       debugPrint(
           '❌ Firestore addAuthAccount failed for staff: $normalizedStaff');
-      _accounts.remove(normalizedStaff);
       return false;
     }
   }

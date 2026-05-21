@@ -26,6 +26,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   bool _isSidebarCollapsed = false;
+  bool _dataLoaded = false;
 
   final List<Map<String, dynamic>> _adminMenuItems = [
     {
@@ -134,7 +135,17 @@ class _MainScreenState extends State<MainScreen> {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isMobile = MediaQuery.of(context).size.width < 768;
-
+// Load data when user is logged in (runs after build is complete)
+    // Load data only once when screen first appears
+    if (!_dataLoaded && authProvider.isLoggedIn) {
+      _dataLoaded = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (authProvider.currentTenantId != null) {
+          productProvider.loadProducts(authProvider.currentTenantId!);
+        }
+        tenantProvider.refreshTenants();
+      });
+    }
     if (isMobile) {
       return Scaffold(
         appBar: AppBar(
@@ -578,6 +589,10 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // lib/screens/main_screen.dart
+
+  // lib/screens/main_screen.dart
+
   Future<void> _showChangePasswordDialog(BuildContext context) async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final currentUser = authProvider.currentUser;
@@ -593,75 +608,149 @@ class _MainScreenState extends State<MainScreen> {
 
     final oldController = TextEditingController();
     final newController = TextEditingController();
+    final confirmController = TextEditingController();
+    bool isLoading = false;
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Change Password'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: oldController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Current password',
-                border: OutlineInputBorder(),
-              ),
+      barrierDismissible: !isLoading,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Change Password'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: oldController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current Password',
+                    border: OutlineInputBorder(),
+                    hintText: 'Enter your current password',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: newController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'New Password',
+                    border: OutlineInputBorder(),
+                    hintText: 'Minimum 6 characters',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm New Password',
+                    border: OutlineInputBorder(),
+                    hintText: 'Re-enter new password',
+                  ),
+                ),
+                if (isLoading)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 16),
+                    child: CircularProgressIndicator(),
+                  ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: newController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'New password',
-                border: OutlineInputBorder(),
+            actions: [
+              TextButton(
+                onPressed: isLoading ? null : () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final oldP = oldController.text.trim();
-              final newP = newController.text.trim();
-              if (oldP.isEmpty || newP.isEmpty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('Please fill in both fields')),
-                );
-                return;
-              }
-              if (newP.length < 6) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                      content:
-                          Text('New password must be at least 6 characters')),
-                );
-                return;
-              }
-              final ok = await authProvider.changePassword(
-                  currentUser.email, oldP, newP);
-              if (ctx.mounted) Navigator.pop(ctx, ok);
-            },
-            child: const Text('Change'),
-          ),
-        ],
+              ElevatedButton(
+                onPressed: isLoading
+                    ? null
+                    : () async {
+                        final oldP = oldController.text.trim();
+                        final newP = newController.text.trim();
+                        final confirmP = confirmController.text.trim();
+
+                        // Validation
+                        if (oldP.isEmpty || newP.isEmpty || confirmP.isEmpty) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                                content: Text('Please fill in all fields')),
+                          );
+                          return;
+                        }
+
+                        if (newP.length < 6) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'New password must be at least 6 characters')),
+                          );
+                          return;
+                        }
+
+                        if (newP != confirmP) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                                content: Text('New passwords do not match')),
+                          );
+                          return;
+                        }
+
+                        if (oldP == newP) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    'New password must be different from current password')),
+                          );
+                          return;
+                        }
+
+                        // Show loading
+                        setState(() {
+                          isLoading = true;
+                        });
+
+                        final success = await authProvider.changePassword(
+                          currentUser.email,
+                          oldP,
+                          newP,
+                        );
+
+                        setState(() {
+                          isLoading = false;
+                        });
+
+                        if (ctx.mounted) {
+                          Navigator.pop(ctx, success);
+                        }
+                      },
+                child: const Text('Change Password'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
     if (mounted) {
       if (result == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password changed successfully!')),
+          const SnackBar(
+            content: Text(
+                '✅ Password changed successfully! Please use your new password next login.'),
+            backgroundColor: Colors.green,
+          ),
         );
+        oldController.clear();
+        newController.clear();
+        confirmController.clear();
       } else if (result == false) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'Unable to change password. Check your current password.')),
+            content: Text(
+                '❌ Failed to change password. Check your current password.'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }

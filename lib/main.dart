@@ -11,32 +11,38 @@ import 'providers/tenant_provider.dart';
 import 'providers/product_provider.dart';
 import 'screens/auth_screen.dart';
 import 'screens/main_screen.dart';
+import 'dart:html' as html;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // For web, use different initialization
+  
+  // Handle web viewport issues
   if (kIsWeb) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } else {
-    await Firebase.initializeApp();
+    // Fix for device toolbar
+    await _fixWebViewport();
   }
-
+  
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
   debugPrint('✅ Firebase initialized successfully!');
 
   final prefs = await SharedPreferences.getInstance();
 
   runApp(MedStockPro(prefs: prefs));
+}
 
-  // Add error handling for web
-  if (kIsWeb) {
-    FlutterError.onError = (FlutterErrorDetails details) {
-      FlutterError.dumpErrorToConsole(details);
-      // You can also send to analytics
-    };
-  }
+// Add this function to fix web viewport issues
+Future<void> _fixWebViewport() async {
+  // Wait for DOM to be ready
+  await Future.delayed(Duration.zero);
+  
+  // Add meta viewport tag to prevent zoom issues
+  final viewport = html.document.createElement('meta');
+  viewport.setAttribute('name', 'viewport');
+  viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+  html.document.head?.append(viewport);
 }
 
 class MedStockPro extends StatelessWidget {
@@ -81,6 +87,15 @@ class MedStockPro extends StatelessWidget {
               ),
             ),
             themeMode: themeProvider.themeMode,
+            // Add builder to handle web constraints
+            builder: (context, child) {
+              return MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: const TextScaler.linear(1.0),
+                ),
+                child: child!,
+              );
+            },
             home: Consumer<AuthProvider>(
               builder: (context, authProvider, _) {
                 if (authProvider.isLoggedIn) {

@@ -18,14 +18,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
   final _searchController = TextEditingController();
   String _selectedCategory = '';
   String _selectedSort = 'az';
-  List<String> _categories = [];
+  List<String> _availableCategories = []; // Categories from actual products
 
   // Pagination variables
-  int _rowsPerPage = PaginatedDataTable.defaultRowsPerPage;
-  int _sortColumnIndex = 0;
-  bool _sortAscending = true;
   int _currentPage = 0;
-  final int _itemsPerPage = 10;
+  int _itemsPerPage = 10;
 
   @override
   void initState() {
@@ -51,57 +48,63 @@ class _ProductsScreenState extends State<ProductsScreen> {
   void _updateCategories() {
     final productProvider =
         Provider.of<ProductProvider>(context, listen: false);
-    _categories =
-        productProvider.products.map((p) => p.category).toSet().toList();
-    _categories.sort();
-    _categories.insert(0, 'All Categories');
-    setState(() {});
-  }
-
-  void _sortProducts(int columnIndex, bool ascending) {
+    // Get unique categories from actual products only
+    final categories = productProvider.products
+        .map((p) => p.category)
+        .where((cat) => cat.isNotEmpty)
+        .toSet()
+        .toList();
+    categories.sort();
     setState(() {
-      _sortColumnIndex = columnIndex;
-      _sortAscending = ascending;
+      _availableCategories = categories;
     });
+    print('Available categories from products: $_availableCategories');
   }
 
-  List<Product> _getSortedProducts(List<Product> products) {
-    final List<Product> sortedList = List.from(products);
-    sortedList.sort((a, b) {
-      switch (_sortColumnIndex) {
-        case 0: // Meds
-          return _sortAscending
-              ? a.meds.compareTo(b.meds)
-              : b.meds.compareTo(a.meds);
-        case 1: // Brand
-          return _sortAscending
-              ? a.brand.compareTo(b.brand)
-              : b.brand.compareTo(a.brand);
-        case 2: // Category
-          return _sortAscending
-              ? a.category.compareTo(b.category)
-              : b.category.compareTo(a.category);
-        case 3: // Lot Number
-          return _sortAscending
-              ? a.lotNumber.compareTo(b.lotNumber)
-              : b.lotNumber.compareTo(a.lotNumber);
-        case 4: // Quantity
-          return _sortAscending
-              ? a.qty.compareTo(b.qty)
-              : b.qty.compareTo(a.qty);
-        case 5: // SRP
-          return _sortAscending
-              ? a.srp.compareTo(b.srp)
-              : b.srp.compareTo(a.srp);
-        case 6: // Status
-          return _sortAscending
-              ? a.stockStatus.compareTo(b.stockStatus)
-              : b.stockStatus.compareTo(a.stockStatus);
-        default:
-          return 0;
-      }
-    });
-    return sortedList;
+  List<Product> _getFilteredProducts(List<Product> allProducts) {
+    var filtered = List<Product>.from(allProducts);
+
+    // Search filter
+    if (_searchController.text.isNotEmpty) {
+      final query = _searchController.text.toLowerCase();
+      filtered = filtered
+          .where((p) =>
+              p.meds.toLowerCase().contains(query) ||
+              p.brand.toLowerCase().contains(query) ||
+              p.lotNumber.toLowerCase().contains(query))
+          .toList();
+    }
+
+    // Category filter - ONLY filter if a valid category is selected
+    if (_selectedCategory.isNotEmpty &&
+        _selectedCategory != 'All Categories' &&
+        _availableCategories.contains(_selectedCategory)) {
+      filtered =
+          filtered.where((p) => p.category == _selectedCategory).toList();
+      print(
+          'Filtering by category: $_selectedCategory, found ${filtered.length} products');
+    }
+
+    // Sort
+    switch (_selectedSort) {
+      case 'az':
+        filtered.sort((a, b) => a.meds.compareTo(b.meds));
+        break;
+      case 'za':
+        filtered.sort((a, b) => b.meds.compareTo(a.meds));
+        break;
+      case 'qty-low':
+        filtered.sort((a, b) => a.qty.compareTo(b.qty));
+        break;
+      case 'qty-high':
+        filtered.sort((a, b) => b.qty.compareTo(a.qty));
+        break;
+      case 'expiry':
+        filtered.sort((a, b) => a.expirationDate.compareTo(b.expirationDate));
+        break;
+    }
+
+    return filtered;
   }
 
   @override
@@ -109,6 +112,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
     final productProvider = Provider.of<ProductProvider>(context);
     final isAdmin = authProvider.isAdmin;
+    final allProducts = productProvider.products;
 
     if (productProvider.isLoading) {
       return const Center(
@@ -123,27 +127,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
     }
 
-    // Get filtered products
-    var filteredProducts = productProvider.getFilteredProducts(
-      search: _searchController.text.isEmpty ? null : _searchController.text,
-      category:
-          _selectedCategory.isEmpty || _selectedCategory == 'All Categories'
-              ? null
-              : _selectedCategory,
-      sortBy: _selectedSort,
-    );
-
-    final sortedProducts = _getSortedProducts(filteredProducts);
+    // Apply filters
+    final filteredProducts = _getFilteredProducts(allProducts);
 
     // Paginate
     final startIndex = _currentPage * _itemsPerPage;
-    final endIndex = (startIndex + _itemsPerPage) > sortedProducts.length
-        ? sortedProducts.length
+    final endIndex = (startIndex + _itemsPerPage) > filteredProducts.length
+        ? filteredProducts.length
         : startIndex + _itemsPerPage;
-    final pageProducts = sortedProducts.sublist(startIndex, endIndex);
-    final totalPages = sortedProducts.isEmpty
+    final pageProducts = filteredProducts.sublist(startIndex, endIndex);
+    final totalPages = filteredProducts.isEmpty
         ? 1
-        : (sortedProducts.length / _itemsPerPage).ceil();
+        : (filteredProducts.length / _itemsPerPage).ceil();
 
     return Column(
       children: [
@@ -166,7 +161,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           icon: const Icon(Icons.clear),
                           onPressed: () {
                             _searchController.clear();
-                            setState(() {});
+                            setState(() {
+                              _currentPage = 0;
+                            });
                           },
                         )
                       : null,
@@ -180,25 +177,32 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _selectedCategory.isEmpty
-                          ? 'All Categories'
-                          : _selectedCategory,
+                      value:
+                          _selectedCategory.isEmpty ? null : _selectedCategory,
+                      hint: const Text('All Categories'),
+                      isExpanded: true,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                       ),
-                      items: _categories
-                          .map((cat) => DropdownMenuItem(
-                                value: cat,
-                                child: Text(cat),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem(
+                            value: '', child: Text('All Categories')),
+                        ..._availableCategories.map((cat) => DropdownMenuItem(
+                              value: cat,
+                              child: Text(cat, overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
                       onChanged: (value) {
+                        print('Dropdown changed to: $value');
                         setState(() {
                           _selectedCategory = value ?? '';
                           _currentPage = 0;
                         });
+                        print('New selected category: $_selectedCategory');
                       },
                     ),
                   ),
@@ -206,10 +210,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   Expanded(
                     child: DropdownButtonFormField<String>(
                       value: _selectedSort,
+                      isExpanded: true,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                       ),
                       items: const [
                         DropdownMenuItem(
@@ -226,15 +233,20 @@ class _ProductsScreenState extends State<ProductsScreen> {
                             value: 'expiry', child: Text('Expiry (Soonest)')),
                       ],
                       onChanged: (value) {
-                        setState(() {
-                          _selectedSort = value!;
-                          _currentPage = 0;
-                        });
+                        setState(() => _selectedSort = value!);
                       },
                     ),
                   ),
                 ],
               ),
+              if (_availableCategories.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'No categories available. Add products with categories first.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ),
             ],
           ),
         ),
@@ -271,112 +283,230 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
         const SizedBox(height: 8),
 
-        // Products Table or Grid
+        // Products Table
         Expanded(
           child: filteredProducts.isEmpty
-              ? const Center(child: Text('No products found'))
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    if (constraints.maxWidth > 800) {
-                      return Column(
-                        children: [
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: SizedBox(
-                                width: constraints.maxWidth,
-                                child: PaginatedDataTable(
-                                  header: const Text(
-                                    'Inventory Management',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold),
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.inventory, size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('No products found'),
+                      SizedBox(height: 8),
+                      Text('Try adjusting your search or filter criteria'),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: [
+                    // Horizontal and Vertical scroll table
+                    Flexible(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.vertical,
+                          child: DataTable(
+                            columnSpacing: 16,
+                            headingRowHeight: 56,
+                            dataRowMinHeight: 56,
+                            dataRowMaxHeight: 80,
+                            columns: [
+                              const DataColumn(
+                                  label: Text('Meds',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Brand',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Category',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Lot#',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Qty',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('UOM',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('SRP',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Expiry Date',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const DataColumn(
+                                  label: Text('Status',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              if (isAdmin)
+                                const DataColumn(
+                                    label: Text('Actions',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold))),
+                            ],
+                            rows: pageProducts.map((product) {
+                              final daysUntilExpiry = product.expirationDate
+                                  .difference(DateTime.now())
+                                  .inDays;
+                              return DataRow(
+                                cells: [
+                                  DataCell(SizedBox(
+                                    width: 150,
+                                    child: Text(
+                                      product.meds,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w500),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  )),
+                                  DataCell(SizedBox(
+                                    width: 120,
+                                    child: Text(product.brand,
+                                        overflow: TextOverflow.ellipsis),
+                                  )),
+                                  DataCell(SizedBox(
+                                    width: 120,
+                                    child: Text(product.category,
+                                        overflow: TextOverflow.ellipsis),
+                                  )),
+                                  DataCell(Text(
+                                    product.lotNumber,
+                                    style: const TextStyle(
+                                        fontFamily: 'monospace', fontSize: 11),
+                                  )),
+                                  DataCell(Text('${product.qty}')),
+                                  DataCell(Text(product.uom)),
+                                  DataCell(Text(
+                                      '₱${product.srp.toStringAsFixed(2)}')),
+                                  DataCell(
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _formatDate(product.expirationDate),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: daysUntilExpiry <= 30
+                                                ? (daysUntilExpiry <= 7
+                                                    ? Colors.red
+                                                    : Colors.orange)
+                                                : null,
+                                            fontWeight: daysUntilExpiry <= 30
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                        ),
+                                        if (daysUntilExpiry <= 30 &&
+                                            daysUntilExpiry > 0)
+                                          const SizedBox(width: 4),
+                                        if (daysUntilExpiry <= 30 &&
+                                            daysUntilExpiry > 0)
+                                          Icon(
+                                            Icons.warning,
+                                            size: 14,
+                                            color: daysUntilExpiry <= 7
+                                                ? Colors.red
+                                                : Colors.orange,
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                  rowsPerPage: _rowsPerPage,
-                                  availableRowsPerPage: const [
-                                    5,
-                                    10,
-                                    25,
-                                    50,
-                                    100
-                                  ],
-                                  onRowsPerPageChanged: (value) {
-                                    setState(() {
-                                      _rowsPerPage = value ??
-                                          PaginatedDataTable.defaultRowsPerPage;
-                                      _currentPage = 0;
-                                    });
-                                  },
-                                  sortColumnIndex: _sortColumnIndex,
-                                  sortAscending: _sortAscending,
-                                  columns: [
-                                    DataColumn(
-                                      label: const Text('Meds'),
-                                      onSort: _sortProducts,
+                                  DataCell(
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: _getStatusColor(product)
+                                            .withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        _getStatusText(product),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: _getStatusColor(product),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
-                                    const DataColumn(label: Text('Brand')),
-                                    const DataColumn(label: Text('Category')),
-                                    const DataColumn(label: Text('Lot#')),
-                                    DataColumn(
-                                      label: const Text('Qty'),
-                                      numeric: true,
-                                      onSort: _sortProducts,
-                                    ),
-                                    const DataColumn(label: Text('UOM')),
-                                    DataColumn(
-                                      label: const Text('SRP'),
-                                      numeric: true,
-                                      onSort: _sortProducts,
-                                    ),
-                                    const DataColumn(label: Text('Status')),
-                                    if (isAdmin)
-                                      const DataColumn(label: Text('Actions')),
-                                  ],
-                                  source: ProductDataSource(
-                                    products: pageProducts,
-                                    totalCount: sortedProducts.length,
-                                    isAdmin: isAdmin,
-                                    context: context,
-                                    onProductChanged: _loadProducts,
-                                    onDelete: (p) => _showDeleteDialog(p),
                                   ),
-                                ),
-                              ),
-                            ),
+                                  if (isAdmin)
+                                    DataCell(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            icon: const Icon(Icons.edit,
+                                                size: 18),
+                                            onPressed: () async {
+                                              final result =
+                                                  await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      AddEditProductScreen(
+                                                          product: product),
+                                                ),
+                                              );
+                                              if (result == true) {
+                                                _loadProducts();
+                                              }
+                                            },
+                                            color: Colors.blue,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete,
+                                                size: 18),
+                                            onPressed: () =>
+                                                _showDeleteDialog(product),
+                                            color: Colors.red,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              );
+                            }).toList(),
                           ),
-                          // Pagination controls
-                          if (sortedProducts.length > _itemsPerPage)
-                            _buildPaginationControls(
-                              currentPage: _currentPage,
-                              totalPages: totalPages,
-                              totalItems: sortedProducts.length,
-                              itemsPerPage: _itemsPerPage,
-                              onPageChanged: (page) {
-                                setState(() {
-                                  _currentPage = page;
-                                });
-                              },
-                            ),
-                        ],
-                      );
-                    } else {
-                      return GridView.builder(
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 0.75,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
                         ),
-                        itemCount: filteredProducts.length,
-                        itemBuilder: (context, index) {
-                          final product = filteredProducts[index];
-                          return _buildProductCard(product, isAdmin);
-                        },
-                      );
-                    }
-                  },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Pagination controls
+                    _buildPaginationControls(
+                      currentPage: _currentPage,
+                      totalPages: totalPages,
+                      totalItems: filteredProducts.length,
+                      itemsPerPage: _itemsPerPage,
+                      onPageChanged: (page) {
+                        setState(() {
+                          _currentPage = page;
+                        });
+                      },
+                      onItemsPerPageChanged: (value) {
+                        setState(() {
+                          _itemsPerPage = value;
+                          _currentPage = 0;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                 ),
         ),
       ],
@@ -389,21 +519,44 @@ class _ProductsScreenState extends State<ProductsScreen> {
     required int totalItems,
     required int itemsPerPage,
     required Function(int) onPageChanged,
+    required Function(int) onItemsPerPageChanged,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'Showing ${currentPage * itemsPerPage + 1} to ${(currentPage + 1) * itemsPerPage > totalItems ? totalItems : (currentPage + 1) * itemsPerPage} of $totalItems items',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          Row(
+            children: [
+              const Text('Show: ', style: TextStyle(fontSize: 12)),
+              DropdownButton<int>(
+                value: itemsPerPage,
+                items: const [5, 10, 25, 50].map((value) {
+                  return DropdownMenuItem<int>(
+                    value: value,
+                    child: Text('$value', style: TextStyle(fontSize: 12)),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    onItemsPerPageChanged(value);
+                  }
+                },
+              ),
+              const SizedBox(width: 16),
+              Text(
+                'Total: $totalItems items',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
           ),
           Row(
             children: [
+              Text(
+                'Page ${currentPage + 1} of ${totalPages == 0 ? 1 : totalPages}',
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(width: 16),
               IconButton(
                 icon: const Icon(Icons.chevron_left, size: 20),
                 onPressed: currentPage > 0
@@ -411,11 +564,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     : null,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Page ${currentPage + 1} of ${totalPages == 0 ? 1 : totalPages}',
-                style: const TextStyle(fontSize: 12),
               ),
               const SizedBox(width: 8),
               IconButton(
@@ -427,144 +575,6 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 constraints: const BoxConstraints(),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductCard(Product product, bool isAdmin) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Product Image Placeholder
-          Container(
-            height: 100,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
-            ),
-            child:
-                Icon(Icons.medication, size: 40, color: Colors.grey.shade400),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.meds,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    product.brand,
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: product.stockStatusColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      product.stockStatusText,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: product.stockStatusColor,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Qty',
-                              style: TextStyle(
-                                  fontSize: 9, color: Colors.grey.shade600)),
-                          Text('${product.qty} ${product.uom}',
-                              style: const TextStyle(fontSize: 11)),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('SRP',
-                              style: TextStyle(
-                                  fontSize: 9, color: Colors.grey.shade600)),
-                          Text('₱${product.srp}',
-                              style: const TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Expiry',
-                              style: TextStyle(
-                                  fontSize: 9, color: Colors.grey.shade600)),
-                          Text(
-                            _formatDate(product.expirationDate),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: product.isExpired || product.isExpiringSoon
-                                  ? Colors.red
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  if (isAdmin) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, size: 18),
-                          onPressed: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    AddEditProductScreen(product: product),
-                              ),
-                            );
-                            if (result == true) {
-                              _loadProducts();
-                            }
-                          },
-                          color: Colors.blue,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, size: 18),
-                          onPressed: () => _showDeleteDialog(product),
-                          color: Colors.red,
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -612,107 +622,28 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
+  String _getStatusText(Product product) {
+    if (product.isExpired && product.isLowStock) return 'EXPIRED + LOW';
+    if (product.isExpired) return 'EXPIRED';
+    if (product.isExpiringSoon && product.isLowStock) return 'CRITICAL';
+    if (product.isExpiringSoon) return 'EXPIRING SOON';
+    if (product.isLowStock) return 'LOW STOCK';
+    return 'IN STOCK';
+  }
+
+  Color _getStatusColor(Product product) {
+    if (product.isExpired && product.isLowStock) return Colors.red.shade900;
+    if (product.isExpired) return Colors.red;
+    if (product.isExpiringSoon && product.isLowStock)
+      return Colors.red.shade700;
+    if (product.isExpiringSoon) return Colors.orange;
+    if (product.isLowStock) return Colors.orange;
+    return Colors.green;
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
-}
-
-// ProductDataSource for PaginatedDataTable
-class ProductDataSource extends DataTableSource {
-  final List<Product> products;
-  final int totalCount;
-  final bool isAdmin;
-  final BuildContext context;
-  final VoidCallback onProductChanged;
-  final Function(Product) onDelete;
-
-  ProductDataSource({
-    required this.products,
-    required this.totalCount,
-    required this.isAdmin,
-    required this.context,
-    required this.onProductChanged,
-    required this.onDelete,
-  });
-
-  @override
-  DataRow? getRow(int index) {
-    if (index >= products.length) return null;
-    final product = products[index];
-
-    return DataRow(
-      cells: [
-        DataCell(Text(product.meds,
-            style: const TextStyle(fontWeight: FontWeight.w500))),
-        DataCell(Text(product.brand)),
-        DataCell(Text(product.category)),
-        DataCell(Text(product.lotNumber,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 11))),
-        DataCell(Text('${product.qty}')),
-        DataCell(Text(product.uom)),
-        DataCell(Text('₱${product.srp.toStringAsFixed(2)}')),
-        DataCell(
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: product.stockStatusColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              product.stockStatusText,
-              style: TextStyle(
-                fontSize: 11,
-                color: product.stockStatusColor,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-        if (isAdmin)
-          DataCell(
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit, size: 18),
-                  onPressed: () async {
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AddEditProductScreen(product: product),
-                      ),
-                    );
-                    if (result == true) {
-                      onProductChanged();
-                    }
-                  },
-                  color: Colors.blue,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: const Icon(Icons.delete, size: 18),
-                  onPressed: () => onDelete(product),
-                  color: Colors.red,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  @override
-  bool get isRowCountApproximate => false;
-
-  @override
-  int get rowCount => products.length;
-
-  @override
-  int get selectedRowCount => 0;
 }

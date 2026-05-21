@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+import 'package:flutter/services.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -234,6 +235,22 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     const SizedBox(height: 16),
 
+// Help Button - Contact Super Admin
+                    OutlinedButton.icon(
+                      onPressed: () => _showContactDialog(context),
+                      icon: const Icon(Icons.help_outline, size: 18),
+                      label: const Text('Need an account? Contact Super Admin'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.indigo.shade600,
+                        side: BorderSide(color: Colors.indigo.shade200),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
                     // Footer
                     Text(
                       'Secure multi-tenant inventory management system',
@@ -304,7 +321,145 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  // lib/screens/auth_screen.dart
+  void _showContactDialog(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.contact_support, color: Colors.indigo),
+            SizedBox(width: 8),
+            Text('Contact Super Admin'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'To get access to MedStock Pro, please contact the system administrator:',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildContactRow(
+                      Icons.email, 'Email:', 'superadmin@medstock.pro', isDark),
+                  const Divider(),
+                  _buildContactRow(
+                      Icons.phone, 'Phone:', '+1 (800) 555-0192', isDark),
+                  const Divider(),
+                  _buildContactRow(
+                      Icons.chat, 'Live Chat:', 'Available 9AM-6PM', isDark),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Super Admin will create your tenant account and send you login credentials.',
+                      style: TextStyle(fontSize: 12, color: Colors.blue),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              // Copy email to clipboard
+              Clipboard.setData(
+                  const ClipboardData(text: 'superadmin@medstock.pro'));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                  content: Text('Email copied to clipboard!'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy Email'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo.shade600,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContactRow(
+      IconData icon, String label, String value, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Colors.indigo.shade600),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 60,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.copy, size: 14, color: Colors.grey.shade500),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: value));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('$label copied to clipboard!'),
+                  duration: const Duration(seconds: 1),
+                ),
+              );
+            },
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _handleLogin() async {
     final email = _emailController.text.trim();

@@ -13,8 +13,11 @@ class FirestoreService {
   // PRODUCTS - Now stored under tenants/{tenantId}/products/
   // ============================================================
 
+  // In firestore_service.dart, update the getProducts method:
+
   Future<List<Product>> getProducts(String tenantId) async {
     try {
+      // Query ONLY products for this specific tenant from their subcollection
       final snapshot = await _db
           .collection('tenants')
           .doc(tenantId)
@@ -31,31 +34,28 @@ class FirestoreService {
             .doc('seeded')
             .get();
 
-        if (seedFlag.exists && seedFlag.data()?['productsSeeded'] == true) {
-          debugPrint(
-              '⚠️ Products already seeded for tenant $tenantId, but none found. This might be a data issue.');
-          return [];
+        // Only seed if not already seeded
+        if (!seedFlag.exists || seedFlag.data()?['productsSeeded'] != true) {
+          debugPrint('📦 Seeding demo products for tenant: $tenantId');
+          final demoProducts = _getDemoProducts(tenantId);
+          for (final product in demoProducts) {
+            await addProduct(product);
+          }
+
+          // Mark as seeded
+          await _db
+              .collection('tenants')
+              .doc(tenantId)
+              .collection('_metadata')
+              .doc('seeded')
+              .set({
+            'productsSeeded': true,
+            'seededAt': FieldValue.serverTimestamp()
+          });
+
+          return demoProducts;
         }
-
-        // Seed demo products for new tenant
-        debugPrint('📦 Seeding demo products for tenant: $tenantId');
-        final demoProducts = _getDemoProducts(tenantId);
-        for (final product in demoProducts) {
-          await addProduct(product);
-        }
-
-        // Mark as seeded
-        await _db
-            .collection('tenants')
-            .doc(tenantId)
-            .collection('_metadata')
-            .doc('seeded')
-            .set({
-          'productsSeeded': true,
-          'seededAt': FieldValue.serverTimestamp()
-        });
-
-        return demoProducts;
+        return [];
       }
 
       return snapshot.docs.map((doc) {
@@ -275,6 +275,8 @@ class FirestoreService {
     }
   }
 
+  // lib/services/firestore_service.dart
+
   Future<List<app_transaction.Transaction>> getTransactions(
       String tenantId) async {
     try {
@@ -308,8 +310,8 @@ class FirestoreService {
         );
       }).toList();
     } catch (e) {
-      debugPrint('⚠️ Firestore getTransactions failed: $e');
-      return [];
+      debugPrint('⚠️ Firestore getTransactions failed for $tenantId: $e');
+      return []; // Return empty list instead of throwing
     }
   }
 
@@ -583,6 +585,8 @@ class FirestoreService {
   // lib/services/firestore_service.dart
 
 // Add this method
+  // lib/services/firestore_service.dart
+
   Future<void> addTenantAuditWithId(
       String tenantId, String auditId, Map<String, dynamic> audit) async {
     try {

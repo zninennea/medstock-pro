@@ -59,6 +59,10 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
       final List<Future> futures = [];
       for (int i = 0; i < _tenants.length; i++) {
         final tenantId = _tenants[i]['id'] as String;
+        // Make sure suspended status is read correctly
+        final isSuspended = _tenants[i]['suspended'] == true;
+        _tenants[i]['suspended'] = isSuspended;
+
         futures.add(_hasTenantPaid(tenantId).then((hasPaid) {
           _tenants[i]['paid'] = hasPaid;
         }));
@@ -247,28 +251,98 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
 
   Future<void> _recordPayment(Map<String, dynamic> tenant) async {
     final tenantObj = Tenant.fromJson(tenant);
+    final tenantId = tenant['id'] as String;
+    final isSuspended = tenant['suspended'] == true;
+    final isPaid = tenant['paid'] == true;
+
+    // Check if tenant is suspended
+    if (isSuspended) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Cannot record payment for a suspended tenant. Reactivate first.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Check if tenant has already paid this month
+    final hasPaidThisMonth = await _hasTenantPaidThisMonth(tenantId);
+
+    if (hasPaidThisMonth) {
+      // Show month name in message
+      final monthName = DateFormat('MMMM yyyy').format(DateTime.now());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ This tenant has already paid for $monthName.'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => PaymentDialog(tenant: tenantObj),
     );
+
     if (result == true) {
       await _refreshTenants();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('✅ Payment recorded!'),
-              backgroundColor: Colors.green),
+            content: Text('✅ Payment recorded and tenant status updated!'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     }
   }
 
+  // Add this method to check if tenant has paid for current month
+  Future<bool> _hasTenantPaidThisMonth(String tenantId) async {
+    try {
+      final now = DateTime.now();
+      final startOfMonth = DateTime(now.year, now.month, 1);
+      final endOfMonth = DateTime(now.year, now.month + 1, 0);
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('payments')
+          .where('tenantId', isEqualTo: tenantId)
+          .where('timestamp', isGreaterThanOrEqualTo: startOfMonth)
+          .where('timestamp', isLessThanOrEqualTo: endOfMonth)
+          .get();
+
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      debugPrint('Error checking monthly payment for $tenantId: $e');
+      return false;
+    }
+  }
+
   Future<void> _suspendTenant(String tenantId, String name) async {
+    // Check if tenant is paid before allowing suspension
+    final tenant = _tenants.firstWhere((t) => t['id'] == tenantId);
+    final isPaid = tenant['paid'] == true;
+
+    if (isPaid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot suspend a paid tenant. Mark as unpaid first.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dctx) => AlertDialog(
         title: const Text('Confirm Suspension'),
-        content: Text('Suspend tenant "$name"?'),
+        content:
+            Text('Suspend tenant "$name"? Suspended tenants cannot log in.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(dctx, false),
@@ -279,21 +353,47 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
         ],
       ),
     );
+
     if (confirm != true) return;
+
+    // Update Firestore
     await _firestoreService.updateTenant(tenantId, {'suspended': true});
+
+    // Update local state immediately
+    for (var i = 0; i < _tenants.length; i++) {
+      if (_tenants[i]['id'] == tenantId) {
+        _tenants[i]['suspended'] = true;
+        break;
+      }
+    }
+
+    // Refresh from Firestore to be sure
     await _refreshTenants();
+
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('✅ Tenant "$name" suspended')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Tenant "$name" has been suspended')),
+      );
     }
   }
 
   Future<void> _activateTenant(String tenantId, String name) async {
     await _firestoreService.updateTenant(tenantId, {'suspended': false});
+
+    // Update local state immediately
+    for (var i = 0; i < _tenants.length; i++) {
+      if (_tenants[i]['id'] == tenantId) {
+        _tenants[i]['suspended'] = false;
+        break;
+      }
+    }
+
     await _refreshTenants();
+
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('✅ Tenant "$name" activated')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Tenant "$name" has been activated')),
+      );
     }
   }
 
@@ -461,28 +561,39 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if (!isSuspended)
+                                      // Suspend button - ONLY SHOW FOR UNPAID TENANTS (not suspended, not paid)
+                                      if (!isSuspended && !isPaid)
                                         IconButton(
-                                            icon: const Icon(Icons.pause_circle,
-                                                color: Colors.orange),
-                                            onPressed: () => _suspendTenant(
-                                                tenant['id'] as String,
-                                                displayName)),
+                                          icon: const Icon(Icons.pause_circle,
+                                              color: Colors.orange),
+                                          tooltip: 'Suspend tenant',
+                                          onPressed: () => _suspendTenant(
+                                              tenant['id'] as String,
+                                              displayName),
+                                        ),
+                                      // Reactivate button - show only if suspended
                                       if (isSuspended)
                                         IconButton(
-                                            icon: const Icon(Icons.play_circle,
-                                                color: Colors.green),
-                                            onPressed: () => _activateTenant(
-                                                tenant['id'] as String,
-                                                displayName)),
+                                          icon: const Icon(Icons.play_circle,
+                                              color: Colors.green),
+                                          tooltip: 'Activate tenant',
+                                          onPressed: () => _activateTenant(
+                                              tenant['id'] as String,
+                                              displayName),
+                                        ),
+                                      // Payment button (small icon) - disable if suspended
                                       IconButton(
-                                          icon: Icon(Icons.payment,
-                                              color: isSuspended
-                                                  ? Colors.grey
-                                                  : Colors.green),
-                                          onPressed: isSuspended
-                                              ? null
-                                              : () => _recordPayment(tenant)),
+                                        icon: Icon(Icons.payment,
+                                            color: isSuspended
+                                                ? Colors.grey
+                                                : Colors.green),
+                                        tooltip: isSuspended
+                                            ? 'Cannot record payment for suspended tenant'
+                                            : 'Record Payment',
+                                        onPressed: isSuspended
+                                            ? null
+                                            : () => _recordPayment(tenant),
+                                      ),
                                     ],
                                   ),
                                   children: [
@@ -509,28 +620,56 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
                                                       : 'Active - Unpaid')),
                                           _buildInfoRow('Payment Status:',
                                               isPaid ? '✅ Paid' : '⚠️ Unpaid'),
-                                          const SizedBox(height: 12),
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: ElevatedButton.icon(
-                                                  onPressed: isSuspended
-                                                      ? null
-                                                      : () => _recordPayment(
-                                                          tenant),
-                                                  icon:
-                                                      const Icon(Icons.payment),
-                                                  label: const Text(
-                                                      'Record Payment'),
-                                                  style:
-                                                      ElevatedButton.styleFrom(
-                                                          backgroundColor:
-                                                              Colors.green,
-                                                          foregroundColor:
-                                                              Colors.white),
-                                                ),
-                                              ),
-                                            ],
+
+                                          // Optional: Add "Already paid this month" indicator
+                                          FutureBuilder<bool>(
+                                            future: _hasTenantPaidThisMonth(
+                                                tenant['id'] as String),
+                                            builder: (context, snapshot) {
+                                              if (snapshot.hasData &&
+                                                  snapshot.data == true) {
+                                                return Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 8),
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          Colors.green.shade50,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              8),
+                                                      border: Border.all(
+                                                          color: Colors
+                                                              .green.shade200),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(Icons.check_circle,
+                                                            size: 16,
+                                                            color: Colors.green
+                                                                .shade700),
+                                                        const SizedBox(
+                                                            width: 8),
+                                                        Expanded(
+                                                          child: Text(
+                                                            '✓ Paid for ${DateFormat('MMMM yyyy').format(DateTime.now())}',
+                                                            style: TextStyle(
+                                                                fontSize: 12,
+                                                                color: Colors
+                                                                    .green
+                                                                    .shade700),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              return const SizedBox.shrink();
+                                            },
                                           ),
                                         ],
                                       ),
@@ -576,41 +715,73 @@ class _TenantManagementScreenState extends State<TenantManagementScreen> {
   Widget _buildStatusChip(bool isPaid, bool isSuspended) {
     if (isSuspended) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.orange.shade100,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(20),
         ),
-        child: const Text('SUSPENDED',
-            style: TextStyle(
-                fontSize: 10,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.pause_circle, size: 12, color: Colors.orange.shade800),
+            const SizedBox(width: 4),
+            Text(
+              'SUSPENDED',
+              style: TextStyle(
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Colors.orange)),
+                color: Colors.orange.shade800,
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (isPaid) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.green.shade100,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(20),
         ),
-        child: const Text('PAID',
-            style: TextStyle(
-                fontSize: 10,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle, size: 12, color: Colors.green.shade800),
+            const SizedBox(width: 4),
+            Text(
+              'PAID',
+              style: TextStyle(
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Colors.green)),
+                color: Colors.green.shade800,
+              ),
+            ),
+          ],
+        ),
       );
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.red.shade100,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: const Text('UNPAID',
-          style: TextStyle(
-              fontSize: 10, fontWeight: FontWeight.bold, color: Colors.red)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.warning, size: 12, color: Colors.red.shade800),
+          const SizedBox(width: 4),
+          Text(
+            'UNPAID',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: Colors.red.shade800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

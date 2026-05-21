@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/product_provider.dart';
 import '../models/product.dart';
-
+import '../providers/auth_provider.dart';
 class AlertsScreen extends StatelessWidget {
   const AlertsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final productProvider = Provider.of<ProductProvider>(context);
-    final alerts = _getAlerts(productProvider.products);
+    final products = productProvider.products;
+
+    // Generate alerts dynamically from products
+    final alerts = _getAlertsFromProducts(products);
 
     if (alerts.isEmpty) {
       return Center(
@@ -29,111 +32,150 @@ class AlertsScreen extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: alerts.length,
-      itemBuilder: (context, index) {
-        final alert = alerts[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: alert.color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
+    return RefreshIndicator(
+      onRefresh: () async {
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        if (authProvider.currentTenantId != null) {
+          await productProvider.refreshProducts(authProvider.currentTenantId!);
+        }
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: alerts.length,
+        itemBuilder: (context, index) {
+          final alert = alerts[index];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            color: alert.backgroundColor,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: alert.iconColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(alert.icon, color: alert.iconColor),
                   ),
-                  child: Icon(alert.icon, color: alert.color),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        alert.product.meds,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Lot: ${alert.product.lotNumber}',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                      const SizedBox(height: 4),
-                      Text(alert.message,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          alert.product.meds,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        const SizedBox(height: 4),
+                        Text('Lot: ${alert.product.lotNumber}',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade600)),
+                        const SizedBox(height: 4),
+                        Text(
+                          alert.message,
                           style: TextStyle(
                               fontSize: 14,
-                              color: alert.color,
-                              fontWeight: FontWeight.w500)),
-                    ],
+                              color: alert.iconColor,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  if (alert.type != AlertType.expired)
+                    IconButton(
+                      icon: const Icon(Icons.shopping_cart, color: Colors.blue),
+                      onPressed: () {
+                        // Navigate to restock
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Go to Record IN/OUT to restock'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      tooltip: 'Restock',
+                    ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
-  List<Alert> _getAlerts(List<Product> products) {
+  List<Alert> _getAlertsFromProducts(List<Product> products) {
     final now = DateTime.now();
     final alerts = <Alert>[];
 
     for (final product in products) {
-      if (product.isExpired) {
-        if (product.isLowStock) {
-          alerts.add(Alert(
-            product: product,
-            type: AlertType.expiredLow,
-            message: '⚠️ EXPIRED + Low Stock (${product.qty} left)',
-            icon: Icons.warning_amber,
-            color: Colors.red.shade900,
-          ));
-        } else {
-          alerts.add(Alert(
-            product: product,
-            type: AlertType.expired,
-            message: '⚠️ EXPIRED on ${_formatDate(product.expirationDate)}',
-            icon: Icons.warning,
-            color: Colors.red,
-          ));
-        }
-      } else if (product.isExpiringSoon && product.isLowStock) {
-        final daysLeft = product.expirationDate.difference(now).inDays;
+      final daysUntilExpiry = product.expirationDate.difference(now).inDays;
+
+      // Critical: Expired + Low Stock
+      if (product.isExpired && product.isLowStock) {
+        alerts.add(Alert(
+          product: product,
+          type: AlertType.expiredLow,
+          message: '⚠️ EXPIRED + Low Stock (${product.qty} left)',
+          icon: Icons.warning_amber,
+          iconColor: Colors.red.shade900,
+          backgroundColor: Colors.red.shade50,
+        ));
+      }
+      // Expired
+      else if (product.isExpired) {
+        alerts.add(Alert(
+          product: product,
+          type: AlertType.expired,
+          message: '⚠️ EXPIRED on ${_formatDate(product.expirationDate)}',
+          icon: Icons.warning,
+          iconColor: Colors.red,
+          backgroundColor: Colors.red.shade50,
+        ));
+      }
+      // Critical: Low Stock + Expiring Soon
+      else if (product.isExpiringSoon && product.isLowStock) {
         alerts.add(Alert(
           product: product,
           type: AlertType.critical,
-          message: '🚨 CRITICAL: Low Stock + Expiring Soon (${product.qty} left, $daysLeft days left)',
+          message:
+              '🚨 CRITICAL: Low Stock (${product.qty} left) + Expires in $daysUntilExpiry days',
           icon: Icons.warning_amber,
-          color: Colors.red.shade700,
+          iconColor: Colors.red.shade700,
+          backgroundColor: Colors.red.shade50,
         ));
-      } else if (product.isExpiringSoon) {
-        final daysLeft = product.expirationDate.difference(now).inDays;
+      }
+      // Expiring Soon
+      else if (product.isExpiringSoon) {
         alerts.add(Alert(
           product: product,
           type: AlertType.expiring,
           message:
-              '📅 Expiring soon: ${_formatDate(product.expirationDate)} ($daysLeft days left)',
+              '📅 Expiring soon: ${_formatDate(product.expirationDate)} ($daysUntilExpiry days left)',
           icon: Icons.calendar_today,
-          color: Colors.orange,
+          iconColor: Colors.orange.shade800,
+          backgroundColor: Colors.orange.shade50,
         ));
-      } else if (product.isLowStock) {
+      }
+      // Low Stock
+      else if (product.isLowStock) {
         alerts.add(Alert(
           product: product,
           type: AlertType.lowStock,
           message:
               '📦 Low stock: ${product.qty} left (Reorder at ${product.reorderThreshold})',
           icon: Icons.inventory,
-          color: Colors.orange,
+          iconColor: Colors.orange.shade800,
+          backgroundColor: Colors.orange.shade50,
         ));
       }
     }
 
+    // Sort by priority: critical first, then expired, then expiring, then low stock
     alerts.sort((a, b) => a.type.priority.compareTo(b.type.priority));
     return alerts;
   }
@@ -148,14 +190,16 @@ class Alert {
   final AlertType type;
   final String message;
   final IconData icon;
-  final Color color;
+  final Color iconColor;
+  final Color backgroundColor;
 
   Alert({
     required this.product,
     required this.type,
     required this.message,
     required this.icon,
-    required this.color,
+    required this.iconColor,
+    required this.backgroundColor,
   });
 }
 

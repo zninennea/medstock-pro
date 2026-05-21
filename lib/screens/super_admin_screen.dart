@@ -12,7 +12,6 @@ import '../models/tenant.dart';
 import '../widgets/payment_dialog.dart';
 import '../services/print_service.dart';
 import 'super_admin/tenant_management_screen.dart';
-import 'super_admin/super_admin_receipts.dart';
 import 'package:excel/excel.dart' as excel;
 import '../models/user.dart';
 import '../services/firestore_service.dart';
@@ -101,46 +100,60 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
   void _printInvoice(String tenantName, double amount, String reference,
       String method, DateTime date) {
     final invoiceHtml = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Invoice - $reference</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .invoice { max-width: 800px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px; }
-        .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .content { margin: 20px 0; }
-        .footer { text-align: center; font-size: 12px; color: #666; margin-top: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 8px; }
-      </style>
-    </head>
-    <body>
-      <div class="invoice">
-        <div class="header">
-          <h2>MedStock Pro Invoice</h2>
-          <p>Reference: $reference</p>
-        </div>
-        <div class="content">
-          <table>
-            <tr><td><strong>Tenant:</strong></td><td>$tenantName</td></tr>
-            <tr><td><strong>Date:</strong></td><td>${DateFormat('yyyy-MM-dd HH:mm').format(date)}</td></tr>
-            <tr><td><strong>Payment Method:</strong></td><td>$method</td></tr>
-            <tr><td><strong>Amount:</strong></td><td>₱${amount.toStringAsFixed(2)}</td></tr>
-          </table>
-        </div>
-        <div class="footer">
-          <p>Thank you for using MedStock Pro!</p>
-        </div>
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Invoice - $reference</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 40px; }
+      .invoice { max-width: 800px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px; }
+      .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }
+      .content { margin: 20px 0; }
+      .footer { text-align: center; font-size: 12px; color: #666; margin-top: 20px; }
+      table { width: 100%; border-collapse: collapse; }
+      td { padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="invoice">
+      <div class="header">
+        <h2>MedStock Pro Invoice</h2>
+        <p>Reference: $reference</p>
       </div>
-      <script>window.print();</script>
-    </body>
-    </html>
-    """;
+      <div class="content">
+        <table>
+          <tr><td><strong>Tenant:</strong></td><td>$tenantName</td></tr>
+          <tr><td><strong>Date:</strong></td><td>${DateFormat('yyyy-MM-dd HH:mm').format(date)}</td></tr>
+          <tr><td><strong>Payment Method:</strong></td><td>$method</td></tr>
+          <tr><td><strong>Amount:</strong></td><td>₱${amount.toStringAsFixed(2)}</td></tr>
+        </table>
+      </div>
+      <div class="footer">
+        <p>Thank you for using MedStock Pro!</p>
+      </div>
+    </div>
+    <script>
+      window.onload = function() {
+        window.print();
+        // Close the window after printing (but don't close immediately)
+        setTimeout(function() {
+          window.close();
+        }, 1000);
+      }
+    </script>
+  </body>
+  </html>
+  """;
 
+    // Open in a new window that closes itself after printing
     final blob = html.Blob([invoiceHtml], 'text/html');
     final url = html.Url.createObjectUrlFromBlob(blob);
-    html.window.open(url, '_blank');
+    final newWindow = html.window.open(url, '_blank');
+
+    // Revoke the URL after a delay to allow the window to load
+    Future.delayed(const Duration(seconds: 2), () {
+      html.Url.revokeObjectUrl(url);
+    });
   }
 
   void _showReceiptFromData(
@@ -487,51 +500,73 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                                       ? Colors.green.shade800
                                                       : Colors.red.shade800))),
                                     )),
+                                    // In the DataTable row, update the Actions column
                                     DataCell(Row(
-                                      mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        // Payment button
                                         IconButton(
-                                            icon: const Icon(Icons.payment,
-                                                size: 20),
-                                            onPressed: () async {
-                                              if (await _hasTenantPaidThisMonth(
-                                                  tenant.id)) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(const SnackBar(
-                                                        content: Text(
-                                                            '⚠️ Already paid this month'),
-                                                        backgroundColor:
-                                                            Colors.orange));
-                                                return;
-                                              }
-                                              final result = await showDialog(
-                                                  context: context,
-                                                  builder: (_) => PaymentDialog(
-                                                      tenant: tenant));
-                                              if (result == true) {
-                                                await _loadPaymentStatuses();
-                                                if (mounted) setState(() {});
-                                              }
-                                            },
-                                            color: Colors.green),
+                                          icon: const Icon(Icons.payment,
+                                              size: 18),
+                                          onPressed: () async {
+                                            final hasPaidThisMonth =
+                                                await _hasTenantPaidThisMonth(
+                                                    tenant.id);
+                                            if (hasPaidThisMonth) {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                const SnackBar(
+                                                    content: Text(
+                                                        '⚠️ Already paid this month'),
+                                                    backgroundColor:
+                                                        Colors.orange),
+                                              );
+                                              return;
+                                            }
+                                            final result = await showDialog(
+                                              context: context,
+                                              builder: (_) =>
+                                                  PaymentDialog(tenant: tenant),
+                                            );
+                                            if (result == true) {
+                                              await _loadPaymentStatuses();
+                                              if (mounted) setState(() {});
+                                            }
+                                          },
+                                          color: tenant.suspended
+                                              ? Colors.grey
+                                              : Colors.green,
+                                          tooltip: tenant.suspended
+                                              ? 'Cannot record payment for suspended tenant'
+                                              : 'Record Payment',
+                                        ),
+                                        // Audit button
                                         IconButton(
-                                            icon: const Icon(Icons.history,
-                                                size: 20),
-                                            onPressed: () => _showAuditDialog(
-                                                context, tenant),
-                                            color: Colors.blue),
+                                          icon: const Icon(Icons.history,
+                                              size: 18),
+                                          onPressed: () =>
+                                              _showAuditDialog(context, tenant),
+                                          color: Colors.blue,
+                                        ),
+                                        // Email reminder button
                                         IconButton(
-                                            icon: Icon(
-                                                hasPaid
-                                                    ? Icons.mail_outline
-                                                    : Icons.mail,
-                                                size: 20),
-                                            onPressed: () =>
-                                                _showEmailSimulatorDialog(
-                                                    context, tenant),
-                                            color: !hasPaid && !isSuspended
-                                                ? Colors.red
-                                                : Colors.grey),
+                                          icon: Icon(
+                                              !hasPaid && !tenant.suspended
+                                                  ? Icons.mail
+                                                  : Icons.mail_outline,
+                                              size: 18),
+                                          onPressed: (!hasPaid &&
+                                                  !tenant.suspended)
+                                              ? () => _showEmailSimulatorDialog(
+                                                  context, tenant)
+                                              : null,
+                                          color: (!hasPaid && !tenant.suspended)
+                                              ? Colors.red
+                                              : Colors.grey,
+                                          tooltip:
+                                              (!hasPaid && !tenant.suspended)
+                                                  ? 'Send Payment Reminder'
+                                                  : 'No reminder needed',
+                                        ),
                                       ],
                                     )),
                                   ]);
@@ -559,42 +594,6 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                         },
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Receipts Button Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Payment Receipts',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 16)),
-                      SizedBox(height: 4),
-                      Text(
-                          'View and verify all payment receipts across tenants',
-                          style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    ],
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const SuperAdminReceiptsScreen())),
-                    icon: const Icon(Icons.receipt_long),
-                    label: const Text('View All Receipts'),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo.shade600,
-                        foregroundColor: Colors.white),
                   ),
                 ],
               ),
@@ -1167,6 +1166,22 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
             ElevatedButton(
               onPressed: () async {
                 if (formKey.currentState!.validate()) {
+                  final loadingSnackBar = SnackBar(
+                    content: Row(
+                      children: const [
+                        SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                        SizedBox(width: 12),
+                        Text('Creating tenant...'),
+                      ],
+                    ),
+                    backgroundColor: Colors.blue,
+                    duration: const Duration(seconds: 10),
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(loadingSnackBar);
+
                   final authProvider =
                       Provider.of<AuthProvider>(context, listen: false);
                   final tenantId =
@@ -1174,13 +1189,21 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                   final normalizedTenantId = tenantId.toLowerCase().trim();
                   final adminEmail = emailController.text.toLowerCase().trim();
 
-                  if (tenantProvider.tenants.containsKey(normalizedTenantId)) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('❌ Tenant ID already exists.'),
-                        backgroundColor: Colors.red));
+                  // Check if tenant already exists FIRST
+                  final existingTenant =
+                      await _firestoreService.getTenant(normalizedTenantId);
+                  if (existingTenant != null) {
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              '❌ Tenant ID already exists. Please use a different name.'),
+                          backgroundColor: Colors.red),
+                    );
                     return;
                   }
 
+                  // Check if email already exists in Firebase Auth
                   bool emailExists = false;
                   try {
                     final methods = await authProvider.firebaseAuth
@@ -1189,53 +1212,76 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                   } catch (e) {
                     emailExists = false;
                   }
+
                   if (emailExists) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text('❌ Email already exists: $adminEmail'),
-                        backgroundColor: Colors.red));
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content:
+                              Text('❌ Admin email already exists: $adminEmail'),
+                          backgroundColor: Colors.red),
+                    );
                     return;
                   }
 
                   try {
+                    // Create tenant in Firestore
                     await tenantProvider.registerTenant(
-                        id: normalizedTenantId,
-                        name: nameController.text,
-                        address: addressController.text,
-                        tier: selectedTier == 'Basic'
-                            ? TenantTier.basic
-                            : TenantTier.premium,
-                        billing: billing,
-                        email: adminEmail);
+                      id: normalizedTenantId,
+                      name: nameController.text,
+                      address: addressController.text,
+                      tier: selectedTier == 'Basic'
+                          ? TenantTier.basic
+                          : TenantTier.premium,
+                      billing: billing,
+                      email: adminEmail,
+                    );
+
+                    // Create admin account in Firebase Auth
                     final created = await authProvider.createAdminAccount(
-                        superAdminEmail: authProvider.currentUser?.email ??
-                            'superadmin@medstock.pro',
-                        adminEmail: adminEmail,
-                        adminName: '${nameController.text} Admin',
-                        tenantId: normalizedTenantId,
-                        password: 'admin123');
-                    if (!created) {
-                      throw Exception('Failed to create admin account');
+                      superAdminEmail: authProvider.currentUser?.email ??
+                          'superadmin@medstock.pro',
+                      adminEmail: adminEmail,
+                      adminName: '${nameController.text} Admin',
+                      tenantId: normalizedTenantId,
+                      password: 'admin123',
+                    );
+
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+                    if (created) {
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '✅ Tenant created! Admin: $adminEmail / admin123'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      await _loadPaymentStatuses();
+                      await tenantProvider.refreshTenants();
+                      if (mounted) {
+                        setState(() {});
+                      }
+                    } else {
+                      // Only delete tenant if admin creation failed AND tenant was just created
+                      // Don't delete if admin already existed (we already checked above)
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              '❌ Failed to create admin account. Please try again.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
                     }
-                    await tenantProvider.addAuditEntry(
-                        normalizedTenantId,
-                        AuditEntry(
-                            timestamp: DateTime.now(),
-                            action: 'Tenant Created',
-                            details:
-                                'Tenant created by ${authProvider.currentUser?.email ?? 'superadmin'}',
-                            user:
-                                authProvider.currentUser?.email ?? 'superadmin',
-                            role: authProvider.currentUser?.role ??
-                                UserRole.superAdmin));
-                    Navigator.pop(ctx);
-                    await _loadPaymentStatuses();
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(
-                            '✅ Tenant added. Admin: $adminEmail / admin123')));
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
                         content: Text('❌ Error: ${e.toString()}'),
-                        backgroundColor: Colors.red));
+                        backgroundColor: Colors.red,
+                      ),
+                    );
                   }
                 }
               },
@@ -1308,11 +1354,4 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
       Expanded(child: Text(value))
     ]);
   }
-}
-
-class PlatformPayment {
-  final String tenantName;
-  final PaymentRecord record;
-
-  PlatformPayment({required this.tenantName, required this.record});
 }
