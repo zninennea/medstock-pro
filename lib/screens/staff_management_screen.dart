@@ -536,30 +536,8 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                                   ],
                                 ),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: staff.password != null
-                                      ? Colors.green.shade50
-                                      : Colors.orange.shade50,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  staff.password != null
-                                      ? 'Password Set'
-                                      : 'No Password',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: staff.password != null
-                                        ? Colors.green.shade800
-                                        : Colors.orange.shade800,
-                                  ),
-                                ),
-                              ),
+                              // REMOVED: Password status indicator since passwords are not stored in Firestore
+                              // Passwords are managed by Firebase Auth only
                             ],
                           ),
                           const SizedBox(height: 20),
@@ -570,7 +548,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                             obscureText:
                                 !(_passwordVisible[staff.email] ?? false),
                             decoration: InputDecoration(
-                              labelText: 'New Password',
+                              labelText: 'Set New Password',
                               hintText: 'Enter new password (min 6 characters)',
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
@@ -643,6 +621,30 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.info_outline,
+                                    size: 16, color: Colors.blue.shade700),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Passwords are securely managed by Firebase Authentication and are not stored in the database.',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.blue.shade700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

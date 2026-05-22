@@ -37,10 +37,12 @@ class AuthProvider extends ChangeNotifier {
   User? _currentUser;
   String? _currentTenantId;
 
+  // Store passwords temporarily for local fallback only (NEVER synced to Firestore)
+  final Map<String, String?> _tempPasswords = {};
+
   final Map<String, AuthAccount> _accounts = {
     'superadmin@medstock.pro': AuthAccount(
       email: 'superadmin@medstock.pro',
-      password: 'super123',
       name: 'Super Admin',
       role: UserRole.superAdmin,
       tenantId: null,
@@ -48,7 +50,6 @@ class AuthProvider extends ChangeNotifier {
     ),
     'admin@davmedical.com': AuthAccount(
       email: 'admin@davmedical.com',
-      password: 'admin123',
       name: 'Davao Medical Admin',
       role: UserRole.admin,
       tenantId: 'davmedical',
@@ -56,7 +57,6 @@ class AuthProvider extends ChangeNotifier {
     ),
     'admin@cebgeneral.com': AuthAccount(
       email: 'admin@cebgeneral.com',
-      password: 'admin123',
       name: 'Cebu General Admin',
       role: UserRole.admin,
       tenantId: 'cebgeneral',
@@ -64,7 +64,6 @@ class AuthProvider extends ChangeNotifier {
     ),
     'maria.santos@davmedical.com': AuthAccount(
       email: 'maria.santos@davmedical.com',
-      password: 'staff123',
       name: 'Maria Santos',
       role: UserRole.staff,
       tenantId: 'davmedical',
@@ -72,7 +71,6 @@ class AuthProvider extends ChangeNotifier {
     ),
     'jun.reyes@davmedical.com': AuthAccount(
       email: 'jun.reyes@davmedical.com',
-      password: null,
       name: 'Jun Reyes',
       role: UserRole.staff,
       tenantId: 'davmedical',
@@ -127,10 +125,6 @@ class AuthProvider extends ChangeNotifier {
           ..clear()
           ..addEntries(remoteAccounts.map((data) {
             final account = AuthAccount.fromJson(data);
-            if (account.password == null &&
-                fallbackAccounts.containsKey(account.email)) {
-              account.password = fallbackAccounts[account.email]!.password;
-            }
             return MapEntry(account.email, account);
           }));
         notifyListeners();
@@ -177,6 +171,10 @@ class AuthProvider extends ChangeNotifier {
   // COMPLETE LOGIN METHOD WITH TENANT SUSPENSION CHECK
   Future<LoginResponse> login(String email, String password) async {
     final normalizedEmail = email.toLowerCase().trim();
+    final tempPasswordKey = '${normalizedEmail}_temp';
+
+    // Store temp password for local fallback (never stored in Firestore)
+    _tempPasswords[tempPasswordKey] = password;
 
     // First, try Firebase Auth sign in
     fb_auth.UserCredential? userCredential;
@@ -191,7 +189,7 @@ class AuthProvider extends ChangeNotifier {
 
       // Check if user exists in our local accounts but not in Firebase
       final fallback = _accounts[normalizedEmail];
-      if (fallback != null && fallback.password == password) {
+      if (fallback != null) {
         // Create the user in Firebase Auth
         try {
           userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
@@ -223,6 +221,9 @@ class AuthProvider extends ChangeNotifier {
         result: LoginResult.invalidCredentials,
       );
     }
+
+    // Clean up temp password
+    _tempPasswords.remove(tempPasswordKey);
 
     // Now get the user profile from Firestore or local accounts
     await _loadAuthAccounts();
@@ -262,7 +263,6 @@ class AuthProvider extends ChangeNotifier {
 
         account = AuthAccount(
           email: normalizedEmail,
-          password: password,
           name: normalizedEmail.split('@').first,
           role: userRole,
           tenantId: tenantId,
@@ -350,8 +350,6 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
-  // lib/providers/auth_provider.dart
-
   Future<bool> changePassword(
     String email,
     String oldPassword,
@@ -386,26 +384,12 @@ class AuthProvider extends ChangeNotifier {
       await currentUser.updatePassword(newPassword);
       debugPrint('✅ Password updated in Firebase Auth');
 
-      // Update password in local Firestore account
-      final account = _accounts[normalizedEmail];
-      if (account != null) {
-        account.password = newPassword;
-        final success = await _firestoreService.updateAuthAccount(
-          account.email,
-          account.toJson(),
-        );
-        if (success) {
-          debugPrint('✅ Password updated in Firestore');
-        } else {
-          debugPrint('⚠️ Failed to update password in Firestore');
-        }
-      }
+      // Note: Password is NOT stored in Firestore
+      // Only Firebase Auth handles password storage
 
       return true;
     } on fb_auth.FirebaseAuthException catch (e) {
       debugPrint('❌ Firebase password change failed: ${e.code} - ${e.message}');
-
-      // Return false with specific error code for UI to handle
       return false;
     } catch (e) {
       debugPrint('❌ Password change error: $e');
@@ -471,7 +455,6 @@ class AuthProvider extends ChangeNotifier {
 
     final account = AuthAccount(
       email: normalizedAdmin,
-      password: password,
       name: adminName,
       role: UserRole.admin,
       tenantId: normalizedTenantId,
@@ -493,8 +476,6 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
   }
-
-  // In auth_provider.dart, simplify the createStaffAccount method:
 
   Future<bool> createStaffAccount({
     required String adminEmail,
@@ -556,7 +537,6 @@ class AuthProvider extends ChangeNotifier {
 
     final account = AuthAccount(
       email: normalizedStaff,
-      password: defaultPassword,
       name: staffName,
       role: UserRole.staff,
       tenantId: normalizedTenantId,
@@ -565,7 +545,6 @@ class AuthProvider extends ChangeNotifier {
 
     _accounts[normalizedStaff] = account;
 
-    // Single attempt to save to Firestore (no retry loop)
     final success = await _firestoreService.addAuthAccount(
         normalizedStaff, account.toJson());
 
@@ -628,11 +607,6 @@ class AuthProvider extends ChangeNotifier {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        // Update local password storage
-        staff.password = password;
-        await _firestoreService.updateAuthAccount(staff.email, staff.toJson());
-        _accounts[normalizedStaff] = staff;
-
         notifyListeners();
         debugPrint('✅ Staff password updated successfully: ${staff.email}');
         return StaffPasswordResult.updated;
@@ -699,13 +673,6 @@ class AuthProvider extends ChangeNotifier {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        final staff = _accounts[staffEmail.toLowerCase().trim()];
-        if (staff != null) {
-          staff.password = newPassword;
-          await _firestoreService.updateAuthAccount(
-              staff.email, staff.toJson());
-          notifyListeners();
-        }
         debugPrint('✅ Password changed via API: $staffEmail');
         return true;
       } else {
@@ -737,7 +704,6 @@ enum StaffPasswordResult {
 
 class AuthAccount {
   final String email;
-  String? password;
   final String name;
   final UserRole role;
   final String? tenantId;
@@ -745,7 +711,6 @@ class AuthAccount {
 
   AuthAccount({
     required this.email,
-    required this.password,
     required this.name,
     required this.role,
     this.tenantId,
@@ -753,17 +718,13 @@ class AuthAccount {
   });
 
   Map<String, dynamic> toJson() {
-    final json = {
+    return {
       'email': email,
       'name': name,
       'role': role.name,
       'tenantId': tenantId,
       'createdBy': createdBy,
     };
-    if (password != null) {
-      json['password'] = password;
-    }
-    return json;
   }
 
   factory AuthAccount.fromJson(Map<String, dynamic> json) {
@@ -772,7 +733,6 @@ class AuthAccount {
         .trim();
     return AuthAccount(
       email: email,
-      password: json['password'] as String?,
       name: json['name'] as String? ?? '',
       role: UserRole.values.firstWhere(
         (e) => e.name == (json['role'] as String? ?? ''),
