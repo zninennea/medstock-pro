@@ -28,6 +28,9 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   late DateTime _expiryDate;
   late String _category;
   late String _uom;
+  String _quantityError = '';
+  String _costError = '';
+  String _srpError = '';
 
   final List<String> _categories = [
     'Antibiotics',
@@ -141,8 +144,51 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                     child: TextFormField(
                       controller: _qtyController,
                       keyboardType: TextInputType.number,
-                      decoration: _buildInputDecoration('Quantity'),
-                      validator: (v) => v?.isEmpty == true ? 'Required' : null,
+                      decoration: _buildInputDecoration('Quantity').copyWith(
+                        errorText:
+                            _quantityError.isNotEmpty ? _quantityError : null,
+                        suffixIcon: _qtyController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.info_outline, size: 16),
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                          'Quantity must be greater than 0'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                              )
+                            : null,
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          final qty = int.tryParse(value);
+                          if (value.isNotEmpty) {
+                            if (qty == null) {
+                              _quantityError = 'Please enter a valid number';
+                            } else if (qty <= 0) {
+                              _quantityError =
+                                  'Quantity must be greater than 0';
+                            } else if (qty > 99999) {
+                              _quantityError = 'Quantity cannot exceed 99,999';
+                            } else {
+                              _quantityError = '';
+                            }
+                          } else {
+                            _quantityError = '';
+                          }
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty)
+                          return 'Quantity is required';
+                        final qty = int.tryParse(value);
+                        if (qty == null) return 'Invalid number';
+                        if (qty <= 0) return 'Quantity must be greater than 0';
+                        return null;
+                      },
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -172,11 +218,34 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                     child: TextFormField(
                       controller: _costController,
                       keyboardType: TextInputType.number,
-                      decoration: _buildInputDecoration('Cost (₱)'),
-                      validator: (v) {
-                        if (v?.isEmpty == true) return 'Required';
-                        if (double.tryParse(v!) == null)
-                          return 'Invalid number';
+                      decoration: _buildInputDecoration('Cost (₱)').copyWith(
+                        errorText: _costError.isNotEmpty ? _costError : null,
+                        prefixText: '₱ ',
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          final cost = double.tryParse(value);
+                          if (value.isNotEmpty) {
+                            if (cost == null) {
+                              _costError = 'Please enter a valid amount';
+                            } else if (cost <= 0) {
+                              _costError = 'Cost must be greater than 0';
+                            } else if (cost > 1000000) {
+                              _costError = 'Cost cannot exceed ₱1,000,000';
+                            } else {
+                              _costError = '';
+                            }
+                          } else {
+                            _costError = '';
+                          }
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty)
+                          return 'Cost is required';
+                        final cost = double.tryParse(value);
+                        if (cost == null) return 'Invalid amount';
+                        if (cost <= 0) return 'Cost must be greater than 0';
                         return null;
                       },
                     ),
@@ -186,11 +255,42 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                     child: TextFormField(
                       controller: _srpController,
                       keyboardType: TextInputType.number,
-                      decoration: _buildInputDecoration('SRP (₱)'),
-                      validator: (v) {
-                        if (v?.isEmpty == true) return 'Required';
-                        if (double.tryParse(v!) == null)
-                          return 'Invalid number';
+                      decoration: _buildInputDecoration('SRP (₱)').copyWith(
+                        errorText: _srpError.isNotEmpty ? _srpError : null,
+                        prefixText: '₱ ',
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          final srp = double.tryParse(value);
+                          final cost = double.tryParse(_costController.text);
+                          if (value.isNotEmpty) {
+                            if (srp == null) {
+                              _srpError = 'Please enter a valid amount';
+                            } else if (srp <= 0) {
+                              _srpError = 'SRP must be greater than 0';
+                            } else if (cost != null && srp < cost) {
+                              _srpError =
+                                  'SRP cannot be less than Cost (₱${cost.toStringAsFixed(2)})';
+                            } else if (srp > 1000000) {
+                              _srpError = 'SRP cannot exceed ₱1,000,000';
+                            } else {
+                              _srpError = '';
+                            }
+                          } else {
+                            _srpError = '';
+                          }
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty)
+                          return 'SRP is required';
+                        final srp = double.tryParse(value);
+                        if (srp == null) return 'Invalid amount';
+                        if (srp <= 0) return 'SRP must be greater than 0';
+                        final cost = double.tryParse(_costController.text);
+                        if (cost != null && srp < cost) {
+                          return 'SRP cannot be less than Cost';
+                        }
                         return null;
                       },
                     ),

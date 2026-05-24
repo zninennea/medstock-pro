@@ -274,7 +274,26 @@ class FirestoreService {
       rethrow;
     }
   }
+// Add this method to firestore_service.dart
 
+  Future<void> resolveAlert(
+      String tenantId, String alertId, String reason) async {
+    try {
+      await _db
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .doc(alertId)
+          .update({
+        'resolved': true,
+        'resolvedAt': FieldValue.serverTimestamp(),
+        'resolvedReason': reason,
+      });
+      debugPrint('✅ Alert resolved: $alertId - $reason');
+    } catch (e) {
+      debugPrint('⚠️ Firestore resolveAlert failed: $e');
+    }
+  }
   // lib/services/firestore_service.dart
 
   Future<List<app_transaction.Transaction>> getTransactions(

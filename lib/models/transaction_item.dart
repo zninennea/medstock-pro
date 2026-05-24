@@ -10,6 +10,7 @@ class TransactionItem {
   String? expiry;
   String? uom;
   String? meds;
+  String? quantityError;
 
   TransactionItem({
     this.product,
@@ -21,6 +22,7 @@ class TransactionItem {
     this.expiry,
     this.uom,
     this.meds,
+    this.quantityError,
   });
 
   void updateFromProduct(Product p) {

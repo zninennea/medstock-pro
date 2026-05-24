@@ -132,28 +132,14 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
         <p>Thank you for using MedStock Pro!</p>
       </div>
     </div>
-    <script>
-      window.onload = function() {
-        window.print();
-        // Close the window after printing (but don't close immediately)
-        setTimeout(function() {
-          window.close();
-        }, 1000);
-      }
-    </script>
+    <script>window.print();</script>
   </body>
   </html>
   """;
 
-    // Open in a new window that closes itself after printing
     final blob = html.Blob([invoiceHtml], 'text/html');
     final url = html.Url.createObjectUrlFromBlob(blob);
-    final newWindow = html.window.open(url, '_blank');
-
-    // Revoke the URL after a delay to allow the window to load
-    Future.delayed(const Duration(seconds: 2), () {
-      html.Url.revokeObjectUrl(url);
-    });
+    html.window.open(url, '_blank');
   }
 
   void _showReceiptFromData(
@@ -176,6 +162,275 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // RECEIPT VERIFICATION METHODS
+  // ============================================
+
+  Future<void> _verifyReceipt(String paymentId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('payments')
+          .doc(paymentId)
+          .update({
+        'isVerified': true,
+        'verifiedAt': FieldValue.serverTimestamp(),
+        'verifiedBy': 'Super Admin',
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Receipt verified successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Refresh the payment status map to update UI
+        await _loadPaymentStatuses();
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error verifying receipt: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error verifying receipt: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showReceiptViewer(BuildContext context, String tenantName,
+      Map<String, dynamic> paymentData, String paymentId) {
+    final isVerified = paymentData['isVerified'] ?? false;
+    final receiptData = paymentData['receiptData'];
+    final amount = (paymentData['amount'] as num?)?.toDouble() ?? 0;
+    final method = paymentData['method'] ?? 'Cash';
+    final reference = paymentData['reference'] ?? 'N/A';
+    final timestamp =
+        (paymentData['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+    final period = (paymentData['period'] as Timestamp?)?.toDate();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(
+                  isVerified ? Icons.verified : Icons.warning_amber_rounded,
+                  color: isVerified ? Colors.green : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Text('Receipt Verification: $tenantName'),
+              ],
+            ),
+            content: SizedBox(
+              width: 380,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isVerified
+                          ? Colors.green.shade50
+                          : Colors.red.shade50,
+                      border: Border.all(
+                          color: isVerified
+                              ? Colors.green.shade300
+                              : Colors.red.shade300),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isVerified
+                              ? Icons.check_circle
+                              : Icons.cancel_outlined,
+                          color: isVerified ? Colors.green : Colors.red,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isVerified
+                              ? 'RECEIPT VERIFIED'
+                              : 'PENDING VERIFICATION',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: isVerified ? Colors.green : Colors.red,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildReceiptDetailRow(
+                      'Billing Period:',
+                      period != null
+                          ? '${period.year}-${period.month.toString().padLeft(2, '0')}'
+                          : 'N/A'),
+                  _buildReceiptDetailRow(
+                      'Amount Paid:', '₱${amount.toStringAsFixed(2)}'),
+                  _buildReceiptDetailRow('Payment Method:', method),
+                  _buildReceiptDetailRow('Reference No:', reference),
+                  _buildReceiptDetailRow('Payment Date:',
+                      DateFormat('yyyy-MM-dd HH:mm').format(timestamp)),
+                  const SizedBox(height: 16),
+                  if (receiptData != null && receiptData.isNotEmpty) ...[
+                    const Text('Receipt Image:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => _showFullReceiptImage(context, receiptData),
+                      child: Container(
+                        height: 150,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            base64Decode(receiptData),
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stack) {
+                              return const Center(
+                                  child: Text('Unable to load image'));
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            _showFullReceiptImage(context, receiptData),
+                        icon: const Icon(Icons.fullscreen, size: 16),
+                        label: const Text('View Full Screen'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  if (!isVerified)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 16, color: Colors.orange),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Click "Verify Receipt" to mark this payment as verified.',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+              if (!isVerified)
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    await _verifyReceipt(paymentId);
+                    Navigator.pop(dialogContext);
+                    // Refresh the UI
+                    setState(() {});
+                  },
+                  icon: const Icon(Icons.check_circle),
+                  label: const Text('Verify Receipt'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  _printInvoice(
+                      tenantName, amount, reference, method, timestamp);
+                },
+                icon: const Icon(Icons.print),
+                label: const Text('Print Invoice'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo.shade600,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showFullReceiptImage(BuildContext context, String receiptData) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Container(
+          width: 500,
+          height: 600,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Text('Receipt Image',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    base64Decode(receiptData),
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceiptDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -383,14 +638,13 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                       Row(
                         children: [
                           ElevatedButton.icon(
-                            onPressed: () =>
-                                _showAddTenantDialog(context, tenantProvider),
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Add Tenant'),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.indigo.shade600,
-                                foregroundColor: Colors.white),
-                          ),
+                              onPressed: () =>
+                                  _showAddTenantDialog(context, tenantProvider),
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('Add Tenant'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.indigo.shade600,
+                                  foregroundColor: Colors.white)),
                           const SizedBox(width: 8),
                           OutlinedButton.icon(
                             onPressed: () => Navigator.push(
@@ -500,10 +754,8 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                                       ? Colors.green.shade800
                                                       : Colors.red.shade800))),
                                     )),
-                                    // In the DataTable row, update the Actions column
                                     DataCell(Row(
                                       children: [
-                                        // Payment button
                                         IconButton(
                                           icon: const Icon(Icons.payment,
                                               size: 18),
@@ -539,7 +791,6 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                               ? 'Cannot record payment for suspended tenant'
                                               : 'Record Payment',
                                         ),
-                                        // Audit button
                                         IconButton(
                                           icon: const Icon(Icons.history,
                                               size: 18),
@@ -547,7 +798,6 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                               _showAuditDialog(context, tenant),
                                           color: Colors.blue,
                                         ),
-                                        // Email reminder button
                                         IconButton(
                                           icon: Icon(
                                               !hasPaid && !tenant.suspended
@@ -704,6 +954,9 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                     final reference =
                                         data['reference'] ?? 'N/A';
                                     final receiptData = data['receiptData'];
+                                    final isVerified =
+                                        data['isVerified'] ?? false;
+                                    final paymentId = doc.id;
 
                                     return DataRow(cells: [
                                       DataCell(Text(
@@ -731,32 +984,40 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                                           style: const TextStyle(
                                               fontFamily: 'monospace',
                                               fontSize: 11))),
-                                      DataCell(Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (receiptData != null)
-                                            IconButton(
-                                                icon: const Icon(Icons.receipt,
-                                                    size: 20),
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (receiptData != null)
+                                              IconButton(
+                                                icon: Icon(Icons.receipt,
+                                                    size: 20,
+                                                    color: isVerified
+                                                        ? Colors.green
+                                                        : Colors.orange),
                                                 onPressed: () =>
-                                                    _showReceiptFromData(
+                                                    _showReceiptViewer(
                                                         context,
                                                         tenantName,
-                                                        receiptData),
-                                                tooltip: 'View Receipt'),
-                                          IconButton(
-                                              icon: const Icon(Icons.print,
-                                                  size: 20,
-                                                  color: Colors.indigo),
-                                              onPressed: () => _printInvoice(
-                                                  tenantName,
-                                                  amount,
-                                                  reference,
-                                                  method,
-                                                  timestamp),
-                                              tooltip: 'Print'),
-                                        ],
-                                      )),
+                                                        data,
+                                                        paymentId),
+                                                tooltip:
+                                                    'View & Verify Receipt',
+                                              ),
+                                            IconButton(
+                                                icon: const Icon(Icons.print,
+                                                    size: 20,
+                                                    color: Colors.indigo),
+                                                onPressed: () => _printInvoice(
+                                                    tenantName,
+                                                    amount,
+                                                    reference,
+                                                    method,
+                                                    timestamp),
+                                                tooltip: 'Print Invoice'),
+                                          ],
+                                        ),
+                                      ),
                                     ]);
                                   }).toList(),
                                 ),

@@ -19,6 +19,10 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   final Map<String, TextEditingController> _passwordControllers = {};
   final Map<String, bool> _passwordVisible = {};
 
+  String _passwordError = '';
+  bool _showPasswordStrength = false;
+  double _passwordStrength = 0;
+  String _passwordStrengthText = '';
   bool _isApiServerRunning = true;
   bool _isLoading = false;
 
@@ -77,6 +81,45 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  // Add method to check password strength
+  void _checkPasswordStrength(String password) {
+    setState(() {
+      if (password.isEmpty) {
+        _passwordStrength = 0;
+        _passwordStrengthText = '';
+        _passwordError = '';
+        _showPasswordStrength = false;
+        return;
+      }
+
+      _showPasswordStrength = true;
+
+      if (password.length < 6) {
+        _passwordStrength = 0.2;
+        _passwordStrengthText = 'Too short (min 6 characters)';
+        _passwordError = 'Password must be at least 6 characters';
+      } else if (password.length >= 6 && password.length < 8) {
+        _passwordStrength = 0.4;
+        _passwordStrengthText = 'Weak';
+        _passwordError = '';
+      } else if (password.length >= 8 && !RegExp(r'[0-9]').hasMatch(password)) {
+        _passwordStrength = 0.6;
+        _passwordStrengthText = 'Fair - Add numbers';
+        _passwordError = '';
+      } else if (password.length >= 8 &&
+          RegExp(r'[0-9]').hasMatch(password) &&
+          !RegExp(r'[A-Z]').hasMatch(password)) {
+        _passwordStrength = 0.8;
+        _passwordStrengthText = 'Good - Add uppercase';
+        _passwordError = '';
+      } else {
+        _passwordStrength = 1.0;
+        _passwordStrengthText = 'Strong';
+        _passwordError = '';
+      }
+    });
   }
 
   Future<void> _createStaffAccount(AuthProvider authProvider) async {
@@ -547,12 +590,14 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                             controller: controller,
                             obscureText:
                                 !(_passwordVisible[staff.email] ?? false),
+                            onChanged: (value) {
+                              _checkPasswordStrength(value);
+                            },
                             decoration: InputDecoration(
-                              labelText: 'Set New Password',
+                              labelText: 'New Password',
                               hintText: 'Enter new password (min 6 characters)',
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
+                                  borderRadius: BorderRadius.circular(14)),
                               prefixIcon: const Icon(Icons.lock),
                               suffixIcon: IconButton(
                                 icon: Icon(
@@ -568,8 +613,44 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                                   });
                                 },
                               ),
+                              errorText: _passwordError.isNotEmpty
+                                  ? _passwordError
+                                  : null,
                             ),
                           ),
+                          // Add password strength indicator below the field
+                          if (_showPasswordStrength)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Column(
+                                children: [
+                                  LinearProgressIndicator(
+                                    value: _passwordStrength,
+                                    backgroundColor: Colors.grey.shade200,
+                                    color: _passwordStrength >= 0.8
+                                        ? Colors.green
+                                        : (_passwordStrength >= 0.6
+                                            ? Colors.orange
+                                            : Colors.red),
+                                    minHeight: 4,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _passwordStrengthText,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: _passwordStrength >= 0.8
+                                          ? Colors.green
+                                          : (_passwordStrength >= 0.6
+                                              ? Colors.orange
+                                              : Colors.red),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           const SizedBox(height: 12),
                           Row(
                             children: [

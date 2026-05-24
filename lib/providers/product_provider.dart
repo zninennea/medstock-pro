@@ -45,6 +45,8 @@ class ProductProvider extends ChangeNotifier {
       // Check and create alerts for new product
       await _checkAndCreateAlerts(product);
 
+      await _resolveAlertsForProduct(product);
+
       debugPrint('✅ Product added successfully: ${product.id}');
     } catch (e) {
       debugPrint('❌ Error adding product: $e');
@@ -72,6 +74,9 @@ class ProductProvider extends ChangeNotifier {
 
       // Check and create alerts after update
       await _checkAndCreateAlerts(product);
+
+      // ADD THIS LINE - Auto-resolve alerts when stock is replenished
+      await _resolveAlertsForProduct(product);
 
       // Also check if stock crossed below threshold
       if (oldProduct.qty > product.reorderThreshold &&
@@ -267,7 +272,107 @@ class ProductProvider extends ChangeNotifier {
   Future<void> refreshProducts(String tenantId) async {
     await loadProducts(tenantId);
   }
+// lib/providers/product_provider.dart
 
+// Add this method to resolve alerts automatically
+  Future<void> _resolveAlertsForProduct(Product product) async {
+    try {
+      // Find all unresolved alerts for this product
+      final alertsSnapshot = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(product.tenantId)
+          .collection('alerts')
+          .where('productId', isEqualTo: product.id)
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      for (final alertDoc in alertsSnapshot.docs) {
+        final alertData = alertDoc.data();
+        final alertType = alertData['type'];
+
+        bool shouldResolve = false;
+        String resolveReason = '';
+
+        if (alertType == 'low_stock' &&
+            product.qty > product.reorderThreshold) {
+          // Stock is now above threshold
+          shouldResolve = true;
+          resolveReason =
+              'Stock replenished to ${product.qty} units (above threshold of ${product.reorderThreshold})';
+        } else if (alertType == 'low_stock' && product.qty == 0) {
+          // Product is out of stock (still alert, but change severity)
+          shouldResolve = true;
+          resolveReason = 'Product is out of stock (0 units remaining)';
+        } else if (alertType == 'expiring' && product.isExpired) {
+          // Product has expired
+          shouldResolve = true;
+          resolveReason = 'Product has expired';
+        } else if (alertType == 'expiring' && product.qty == 0) {
+          // Product is out of stock before expiry
+          shouldResolve = true;
+          resolveReason = 'Product is out of stock (0 units remaining)';
+        } else if (alertType == 'critical' &&
+            (product.qty == 0 || product.isExpired)) {
+          // Critical alert resolved
+          shouldResolve = true;
+          resolveReason = product.qty == 0
+              ? 'Product is out of stock'
+              : 'Product has expired';
+        }
+
+        if (shouldResolve) {
+          await alertDoc.reference.update({
+            'resolved': true,
+            'resolvedAt': FieldValue.serverTimestamp(),
+            'resolvedReason': resolveReason,
+          });
+          debugPrint(
+              '✅ Auto-resolved ${alertType} alert for product: ${product.meds} - $resolveReason');
+        } else if (alertType == 'low_stock' &&
+            product.qty <= product.reorderThreshold &&
+            product.qty > 0) {
+          // Update existing alert with new stock level
+          await alertDoc.reference.update({
+            'currentStock': product.qty,
+            'message':
+                '⚠️ Low stock: ${product.meds} has only ${product.qty} units left (threshold: ${product.reorderThreshold})',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          debugPrint(
+              '📝 Updated low stock alert for: ${product.meds} (now ${product.qty} units)');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error resolving alerts for product ${product.id}: $e');
+    }
+  }
+
+  Future<void> resolveAllAlertsForTenant(String tenantId) async {
+    try {
+      final alertsSnapshot = await FirebaseFirestore.instance
+          .collection('tenants')
+          .doc(tenantId)
+          .collection('alerts')
+          .where('resolved', isEqualTo: false)
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+
+      for (final doc in alertsSnapshot.docs) {
+        batch.update(doc.reference, {
+          'resolved': true,
+          'resolvedAt': FieldValue.serverTimestamp(),
+          'resolvedReason': 'Bulk resolve by admin',
+        });
+      }
+
+      await batch.commit();
+      debugPrint(
+          '✅ Resolved ${alertsSnapshot.docs.length} alerts for tenant: $tenantId');
+    } catch (e) {
+      debugPrint('❌ Failed to resolve alerts: $e');
+    }
+  }
   // lib/providers/product_provider.dart
 
   List<Product> getFilteredProducts({

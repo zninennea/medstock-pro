@@ -13,6 +13,7 @@ import 'screens/auth_screen.dart';
 import 'screens/main_screen.dart';
 import 'dart:html' as html;
 
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   

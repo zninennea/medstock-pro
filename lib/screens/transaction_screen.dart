@@ -1091,6 +1091,31 @@ class _TransactionScreenState extends State<TransactionScreen> {
     );
   }
 
+  void _validateQuantity(int index, String value) {
+    final qty = int.tryParse(value);
+    final product = _items[index].product;
+    String error = '';
+
+    if (value.isEmpty) {
+      error = 'Quantity is required';
+    } else if (qty == null) {
+      error = 'Please enter a valid number';
+    } else if (qty <= 0) {
+      error = 'Quantity must be greater than 0';
+    } else if (qty > 9999) {
+      error = 'Quantity cannot exceed 9,999';
+    } else if (_transactionType == model.TransactionType.stockOut &&
+        product != null) {
+      if (qty > product.qty) {
+        error = 'Insufficient stock. Available: ${product.qty}';
+      }
+    }
+    setState(() {
+      _items[index].quantityError = error;
+      _items[index].qty = qty ?? 1;
+    });
+  }
+
   Widget _buildTransactionItem(
       int index, TransactionItem item, List<Product> products, bool isDark) {
     return Container(
@@ -1192,10 +1217,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       labelText: 'Quantity (${item.uom ?? 'units'})',
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12)),
+                      errorText: item.quantityError,
+                      errorMaxLines: 2,
                     ),
                     onChanged: (value) {
-                      final qty = int.tryParse(value) ?? 1;
-                      _updateItemQty(index, qty);
+                      _validateQuantity(index, value);
                     },
                   ),
                 ),
