@@ -76,5 +76,5 @@ MedStock Pro is a comprehensive multi-tenant pharmacy inventory management syste
 
 1. Clone the repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/medstock-pro.git
+git clone https://github.com/zninennea/medstock-pro.git
 cd medstock-pro
